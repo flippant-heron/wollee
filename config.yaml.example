@@ -1,0 +1,10 @@
+server:
+  port: 8080
+  subnetBroadcast: 192.168.1.255
+  telegramToken: ""
+  allowedTelegramUsers: []
+
+client:
+  serverURL: http://127.0.0.1:8080
+  macAddress: 00:11:22:33:44:55
+  heartbeatInterval: 30s
