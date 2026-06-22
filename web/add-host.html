@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Add Host - wollee</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+  <main class="container" x-data="addHostApp()" x-init="init()">
+    <nav>
+      <ul><li><strong>wollee</strong></li></ul>
+      <ul><li><a href="/">Back to Hosts</a></li></ul>
+    </nav>
+
+    <article>
+      <header>
+        <h1>Add new host</h1>
+        <p>Register a new Wake-on-LAN host.</p>
+      </header>
+
+      <template x-if="error">
+        <p><mark x-text="error"></mark></p>
+      </template>
+
+      <template x-if="success">
+        <p style="color: green;">Host added successfully. Redirecting...</p>
+      </template>
+
+      <form @submit.prevent="addHost()" v-if="!success">
+        <div>
+          <label for="hostname">Hostname</label>
+          <input id="hostname" type="text" x-model="form.hostname" placeholder="e.g., desktop-1" required>
+        </div>
+        <div>
+          <label for="mac">MAC address</label>
+          <input id="mac" type="text" x-model="form.mac" placeholder="e.g., 00:11:22:33:44:55" required>
+        </div>
+        <div>
+          <label for="ip">IP address</label>
+          <input id="ip" type="text" x-model="form.ip" placeholder="e.g., 192.168.1.100" required>
+        </div>
+        <div>
+          <button type="submit" :disabled="loading">Add Host</button>
+          <a href="/" role="button" class="secondary">Cancel</a>
+        </div>
+      </form>
+    </article>
+  </main>
+
+  <script>
+    function addHostApp() {
+      return {
+        form: { hostname: '', mac: '', ip: '' },
+        loading: false,
+        error: '',
+        success: false,
+        init() {
+          // Form is ready
+        },
+        async addHost() {
+          this.error = '';
+          try {
+            if (!this.form.hostname || !this.form.mac || !this.form.ip) {
+              throw new Error('All fields are required');
+            }
+            this.loading = true;
+            const response = await fetch('/hosts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.form)
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({ error: 'add host request failed' }));
+              throw new Error(payload.error || `add host request failed: ${response.status}`);
+            }
+            this.success = true;
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 1000);
+          } catch (error) {
+            this.error = error.message;
+          } finally {
+            this.loading = false;
+          }
+        }
+      };
+    }
+  </script>
+</body>
+</html>

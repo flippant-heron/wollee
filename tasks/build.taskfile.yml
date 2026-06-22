@@ -1,0 +1,92 @@
+version: '3'
+
+vars:
+  BUILD_FLAGS: -ldflags="-s -w"
+  DIST_DIR: dist
+
+includes:
+  assets: ./assets.taskfile.yml
+
+tasks:
+  _check-assets:
+    internal: true
+    desc: Ensure assets are present before build
+    status:
+      - test -f web/static/alpine.min.js && test -f web/static/pico.min.css
+    cmds:
+      - task: assets:dl
+
+  _build:
+    internal: true
+    desc: Internal task to build a binary for a given platform
+    requires:
+      vars: [GOOS, GOARCH, CMD, OUTPUT]
+    cmds:
+      - mkdir -p {{.DIST_DIR}}
+      - GOOS={{.GOOS}} GOARCH={{.GOARCH}} go build {{.BUILD_FLAGS}} -o {{.DIST_DIR}}/{{.OUTPUT}} ./cmd/{{.CMD}}
+
+  # Individual platform/arch combinations
+  linux:amd64:
+    desc: Build for Linux amd64
+    deps:
+      - _check-assets
+      - task: _build
+        vars: {GOOS: linux, GOARCH: amd64, CMD: agent, OUTPUT: wol-agent-linux-amd64}
+      - task: _build
+        vars: {GOOS: linux, GOARCH: amd64, CMD: server, OUTPUT: wol-server-linux-amd64}
+
+  linux:arm64:
+    desc: Build for Linux arm64
+    deps:
+      - _check-assets
+      - task: _build
+        vars: {GOOS: linux, GOARCH: arm64, CMD: agent, OUTPUT: wol-agent-linux-arm64}
+      - task: _build
+        vars: {GOOS: linux, GOARCH: arm64, CMD: server, OUTPUT: wol-server-linux-arm64}
+
+  windows:amd64:
+    desc: Build for Windows amd64
+    deps:
+      - _check-assets
+      - task: _build
+        vars: {GOOS: windows, GOARCH: amd64, CMD: agent, OUTPUT: wol-agent-windows-amd64.exe}
+      - task: _build
+        vars: {GOOS: windows, GOARCH: amd64, CMD: server, OUTPUT: wol-server-windows-amd64.exe}
+
+  windows:arm64:
+    desc: Build for Windows arm64
+    deps:
+      - _check-assets
+      - task: _build
+        vars: {GOOS: windows, GOARCH: arm64, CMD: agent, OUTPUT: wol-agent-windows-arm64.exe}
+      - task: _build
+        vars: {GOOS: windows, GOARCH: arm64, CMD: server, OUTPUT: wol-server-windows-arm64.exe}
+
+  darwin:amd64:
+    desc: Build for macOS amd64
+    deps:
+      - _check-assets
+      - task: _build
+        vars: {GOOS: darwin, GOARCH: amd64, CMD: agent, OUTPUT: wol-agent-darwin-amd64}
+      - task: _build
+        vars: {GOOS: darwin, GOARCH: amd64, CMD: server, OUTPUT: wol-server-darwin-amd64}
+
+  darwin:arm64:
+    desc: Build for macOS arm64
+    deps:
+      - _check-assets
+      - task: _build
+        vars: {GOOS: darwin, GOARCH: arm64, CMD: agent, OUTPUT: wol-agent-darwin-arm64}
+      - task: _build
+        vars: {GOOS: darwin, GOARCH: arm64, CMD: server, OUTPUT: wol-server-darwin-arm64}
+
+  # Meta tasks
+  all:
+    desc: Build all cross-platform release artifacts
+    deps:
+      - linux:amd64
+      - linux:arm64
+      - windows:amd64
+      - windows:arm64
+      - darwin:amd64
+      - darwin:arm64

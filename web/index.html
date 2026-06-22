@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wollee</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <script defer src="/static/alpine.min.js"></script>
+  <style>
+    .status-dot { display: inline-block; width: .75rem; height: .75rem; border-radius: 999px; margin-right: .5rem; }
+    .status-online { background: #2fb344; }
+    .status-offline { background: #d63939; }
+    code { white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <main class="container" x-data="wolleeApp()" x-init="load()">
+    <nav>
+      <ul><li><strong>wollee</strong></li></ul>
+      <ul>
+        <li><button type="button" class="secondary" @click="load()" :aria-busy="loading">Refresh</button></li>
+        <li><a href="/add-host" role="button">Add Host</a></li>
+      </ul>
+    </nav>
+
+    <article>
+      <header>
+        <h1>Wake-on-LAN hosts</h1>
+        <p>Registered clients appear below with their most recent heartbeat.</p>
+      </header>
+
+      <template x-if="error">
+        <p><mark x-text="error"></mark></p>
+      </template>
+
+      <figure style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Hostname</th>
+              <th>MAC</th>
+              <th>IP</th>
+              <th>Last seen</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="hosts.length === 0">
+              <tr><td colspan="6">No hosts registered yet.</td></tr>
+            </template>
+            <template x-for="host in hosts" :key="host.mac">
+              <tr>
+                <td><span class="status-dot" :class="host.active ? 'status-online' : 'status-offline'"></span><span x-text="host.active ? 'Online' : 'Offline'"></span></td>
+                <td x-text="host.hostname"></td>
+                <td><code x-text="host.mac"></code></td>
+                <td x-text="host.ip"></td>
+                <td x-text="new Date(host.lastSeen).toLocaleString()"></td>
+                <td>
+                  <button type="button" @click="wake(host.mac)" :disabled="loading">Wake</button>
+                  <button type="button" class="secondary" @click="deleteHost(host.mac)" :disabled="loading">Delete</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </figure>
+    </article>
+  </main>
+
+  <script>
+    function wolleeApp() {
+      return {
+        hosts: [],
+        loading: false,
+        error: '',
+        async load() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const response = await fetch('/status');
+            if (!response.ok) {
+              throw new Error(`status request failed: ${response.status}`);
+            }
+            const payload = await response.json();
+            this.hosts = payload.hosts ?? [];
+          } catch (error) {
+            this.error = error.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+        async wake(mac) {
+          this.error = '';
+          try {
+            const response = await fetch('/wake', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mac })
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({ error: 'wake request failed' }));
+              throw new Error(payload.error || `wake request failed: ${response.status}`);
+            }
+            await this.load();
+          } catch (error) {
+            this.error = error.message;
+          }
+        },
+        async deleteHost(mac) {
+          this.error = '';
+          if (!confirm(`Delete host ${mac}?`)) {
+            return;
+          }
+          try {
+            const response = await fetch(`/hosts/${mac}`, {
+              method: 'DELETE'
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({ error: 'delete request failed' }));
+              throw new Error(payload.error || `delete request failed: ${response.status}`);
+            }
+            await this.load();
+          } catch (error) {
+            this.error = error.message;
+          }
+        }
+      };
+    }
+  </script>
+</body>
+</html>

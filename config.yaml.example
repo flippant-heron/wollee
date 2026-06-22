@@ -1,0 +1,11 @@
+server:
+  port: 8080
+  subnetBroadcast: 192.168.1.255
+  defaultHeartbeatInterval: 30s
+  activeTimeout: 5m
+  telegramToken: ""
+  allowedTelegramUsers: []
+
+hosts:
+  - hostname: desktop
+    mac: 00:11:22:33:44:55
