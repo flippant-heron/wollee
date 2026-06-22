@@ -84,7 +84,12 @@ func buildServerService(configPath string) (*serverRuntime, error) {
 		return nil, err
 	}
 
-	registry, err := server.OpenRegistry(config.RegistryPath(cfg.SourcePath))
+	registryPath := cfg.SourcePath
+	if registryPath == "" {
+		registryPath = config.DefaultPath()
+	}
+
+	registry, err := server.OpenRegistry(registryPath)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -98,6 +99,12 @@ func buildAgentService(opts cliOptions) (*serviceRuntime, error) {
 		RequestTimeout:   opts.requestTimeout,
 		InitialHeartbeat: opts.initialHeartbeat,
 	}, logger)
+
+	// Pre-validate configuration before starting service
+	if err := runner.PreCheck(context.Background()); err != nil {
+		return nil, fmt.Errorf("agent pre-check failed: %w", err)
+	}
+
 	program := appservice.NewProgram(runner, logger)
 
 	args := []string{"run"}

@@ -17,7 +17,10 @@
   <main class="container" x-data="wolleeApp()" x-init="load()">
     <nav>
       <ul><li><strong>wollee</strong></li></ul>
-      <ul><li><button type="button" class="secondary" @click="load()" :aria-busy="loading">Refresh</button></li></ul>
+      <ul>
+        <li><button type="button" class="secondary" @click="load()" :aria-busy="loading">Refresh</button></li>
+        <li><a href="/add-host" role="button">Add Host</a></li>
+      </ul>
     </nav>
 
     <article>
@@ -39,7 +42,7 @@
               <th>MAC</th>
               <th>IP</th>
               <th>Last seen</th>
-              <th>Action</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -53,7 +56,10 @@
                 <td><code x-text="host.mac"></code></td>
                 <td x-text="host.ip"></td>
                 <td x-text="new Date(host.lastSeen).toLocaleString()"></td>
-                <td><button type="button" @click="wake(host.mac)">Wake</button></td>
+                <td>
+                  <button type="button" @click="wake(host.mac)" :disabled="loading">Wake</button>
+                  <button type="button" class="secondary" @click="deleteHost(host.mac)" :disabled="loading">Delete</button>
+                </td>
               </tr>
             </template>
           </tbody>
@@ -95,6 +101,24 @@
             if (!response.ok) {
               const payload = await response.json().catch(() => ({ error: 'wake request failed' }));
               throw new Error(payload.error || `wake request failed: ${response.status}`);
+            }
+            await this.load();
+          } catch (error) {
+            this.error = error.message;
+          }
+        },
+        async deleteHost(mac) {
+          this.error = '';
+          if (!confirm(`Delete host ${mac}?`)) {
+            return;
+          }
+          try {
+            const response = await fetch(`/hosts/${mac}`, {
+              method: 'DELETE'
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({ error: 'delete request failed' }));
+              throw new Error(payload.error || `delete request failed: ${response.status}`);
             }
             await this.load();
           } catch (error) {

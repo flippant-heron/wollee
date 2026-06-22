@@ -1,15 +1,15 @@
 # wollee
 
-Minimalist Wake-on-LAN management with a central server and lightweight agents.
+Minimalist Wake-on-LAN management service, with a central server and lightweight downstream agents, written in go.
 
 ## Rationale
 
-wollee keeps management simple: agents only heartbeat upstream servers, while wake authorization and packet delivery stay centralized. This avoids exposing WoL controls on every host and keeps operations auditable through one API surface.
+wollee keeps power management simple: download the agent onto a downstream device and set it up as a service that sends heartbeats to an upstream server. The upstream server listens for heartbeats and keeps a centralized registry of connected clients. When a downstream client is unresponsive, the server can send a WoL packet to the client to wake it up.
 
 ## Components
 
-- `cmd/server`: registry API, optional Telegram control, and embedded web UI.
-- `cmd/agent`: heartbeat daemon that auto-detects local network identity.
+- `cmd/server`: simple registry API and embedded web UI written with vanilla go http. includes optional Telegram bot integration. the yaml config file serves as a simple flat file database.
+- `cmd/agent`: heartbeat daemon that auto-detects local network identity of device and sends it to the central server.
 
 ## Configuration
 
@@ -20,15 +20,27 @@ server:
   port: 8080
   subnetBroadcast: 192.168.1.255
   defaultHeartbeatInterval: 30s
+  activeTimeout: 5m
   telegramToken: ""
   allowedTelegramUsers: []
 
 hosts:
   - hostname: desktop
     mac: 00:11:22:33:44:55
+
 ```
 
 `defaultHeartbeatInterval` is returned by `/register` and controls downstream heartbeat cadence.
+
+## Design
+
+Simple client/server setup where the assumption is simply that if a connection goes stale (active timeout expires since last heartbeat), the downstream service is considered to be offline.
+
+There is no complex state checking mechanism. The server just listens for heartbeats and the downstream agents send them periodically over standard http/s.
+
+You are responsible for the configuration of the other machines, managing the network, controlling how devices are accessed and shutdown, and for setting up the WoL agent services on target devices yourself.
+
+There are many frameworks which try to work across proxies, traverse subnets, manage system power, integrate with frameworks (e.g. home assistant), or use fanciful protocol hacks to sense and control network devices. This (very intentionally) does none of those things.
 
 ## Running as applications
 
@@ -36,7 +48,7 @@ hosts:
 
 ```bash
 cp config.yaml.example config.yaml
-task assets:sync
+task assets:dl
 go run ./cmd/server run --config ./config.yaml
 ```
 
@@ -84,19 +96,10 @@ If `server.telegramToken` is set and `allowedTelegramUsers` is non-empty:
 
 ## Development
 
+Uses [taskfiles](https://taskfile.dev) for development.
+
 - `task lint`
 - `task test`
 - `task build:local`
-- `task assets:sync`
+- `task assets:dl`
 - `task build:release`
-
-## CI/CD
-
-PR and branch CI runs lint/test only.
-
-Release binaries are generated only for tagged pushes (`v*`) using Task-based build steps after asset sync.
-
-## Alternatives considered
-
-- Per-agent local wake control: rejected to avoid distributed access control and duplicated security surfaces.
-- Persistent database registry: rejected in favor of simple YAML state for low operational overhead.

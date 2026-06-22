@@ -14,16 +14,15 @@ import (
 	webassets "github.com/flippant-heron/wollee/web"
 )
 
-const activeWindow = 5 * time.Minute
-
 type App struct {
-	cfg       config.ServerConfig
-	logger    *appservice.Logger
-	registry  *Registry
-	httpSrv   *http.Server
-	telegram  *telegram.Service
-	staticFS  fs.FS
-	indexHTML []byte
+	cfg        config.ServerConfig
+	logger     *appservice.Logger
+	registry   *Registry
+	httpSrv    *http.Server
+	telegram   *telegram.Service
+	staticFS   fs.FS
+	indexHTML  []byte
+	addHostHTML []byte
 }
 
 type registerRequest struct {
@@ -62,18 +61,24 @@ func New(cfg config.ServerConfig, registry *Registry, logger *appservice.Logger)
 		return nil, fmt.Errorf("read index.html: %w", err)
 	}
 
+	addHostHTML, err := webassets.Assets.ReadFile("add-host.html")
+	if err != nil {
+		return nil, fmt.Errorf("read add-host.html: %w", err)
+	}
+
 	for _, requiredAsset := range []string{"alpine.min.js", "pico.min.css"} {
 		if _, err := fs.ReadFile(staticFS, requiredAsset); err != nil {
-			return nil, fmt.Errorf("missing embedded asset %q: run `task assets` before build", requiredAsset)
+			return nil, fmt.Errorf("missing embedded asset %q: run `task assets:dl` before build", requiredAsset)
 		}
 	}
 
 	app := &App{
-		cfg:       cfg,
-		logger:    logger,
-		registry:  registry,
-		staticFS:  staticFS,
-		indexHTML: indexHTML,
+		cfg:        cfg,
+		logger:     logger,
+		registry:   registry,
+		staticFS:   staticFS,
+		indexHTML:  indexHTML,
+		addHostHTML: addHostHTML,
 	}
 
 	app.telegram = telegram.New(cfg.TelegramToken, cfg.AllowedTelegramUsers, app, logger)

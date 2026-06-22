@@ -1,9 +1,5 @@
 version: '3'
 
-vars:
-  ALPINE_VERSION: 3.15.12
-  PICO_VERSION: 2.1.1
-
 includes:
   assets: ./tasks/assets.taskfile.yml
   build: ./tasks/build.taskfile.yml
@@ -20,7 +16,14 @@ tasks:
       - go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run --timeout=5m --enable=errcheck --enable=unused
 
   build:local:
-    desc: Build local binaries
+    desc: Build local binaries (current OS)
+    deps:
+      - build:_check-assets
     cmds:
-      - go build ./cmd/agent
-      - go build ./cmd/server
+      - go build -o {{.ROOT_DIR}}/dist/agent {{.ROOT_DIR}}/cmd/agent
+      - go build -o {{.ROOT_DIR}}/dist/server {{.ROOT_DIR}}/cmd/server
+
+  build:
+    desc: Alias for build:all - build all cross-platform release artifacts
+    cmds:
+      - task: build:all

@@ -1,16 +1,22 @@
 version: '3'
 
+vars:
+  ALPINE_VERSION: 3.15.12
+  PICO_VERSION: 2.1.1
+  WEB_STATIC: web/static
+
 tasks:
-  sync:
+  dl:
     desc: Download embedded web assets from npm package distributions
     cmds:
-      - mkdir -p web/static
+      - mkdir -p {{.ROOT_DIR}}/{{.WEB_STATIC}}
       - >-
         tmp_dir="$(mktemp -d)" &&
+        trap "rm -rf $tmp_dir" EXIT &&
         cd "$tmp_dir" &&
         npm pack alpinejs@{{.ALPINE_VERSION}} @picocss/pico@{{.PICO_VERSION}} &&
         mkdir alpinejs picocss &&
         tar -xzf alpinejs-{{.ALPINE_VERSION}}.tgz -C alpinejs &&
         tar -xzf picocss-pico-{{.PICO_VERSION}}.tgz -C picocss &&
-        cp alpinejs/package/dist/cdn.min.js /home/runner/work/wollee/wollee/web/static/alpine.min.js &&
-        cp picocss/package/css/pico.min.css /home/runner/work/wollee/wollee/web/static/pico.min.css
+        cp alpinejs/package/dist/cdn.min.js {{.ROOT_DIR}}/{{.WEB_STATIC}}/alpine.min.js &&
+        cp picocss/package/css/pico.min.css {{.ROOT_DIR}}/{{.WEB_STATIC}}/pico.min.css

@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +23,7 @@ type ServerConfig struct {
 	Port                     int
 	SubnetBroadcast          string
 	DefaultHeartbeatInterval time.Duration
+	ActiveTimeout            time.Duration
 	TelegramToken            string
 	AllowedTelegramUsers     []int64
 }
@@ -42,6 +42,7 @@ type rawServerConfig struct {
 	Port                     int     `mapstructure:"port"`
 	SubnetBroadcast          string  `mapstructure:"subnetBroadcast"`
 	DefaultHeartbeatInterval string  `mapstructure:"defaultHeartbeatInterval"`
+	ActiveTimeout            string  `mapstructure:"activeTimeout"`
 	TelegramToken            string  `mapstructure:"telegramToken"`
 	AllowedTelegramUsers     []int64 `mapstructure:"allowedTelegramUsers"`
 }
@@ -60,6 +61,7 @@ func Load(path string) (Config, error) {
 	v.SetConfigType("yaml")
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.defaultHeartbeatInterval", "30s")
+	v.SetDefault("server.activeTimeout", "5m")
 
 	if err := v.ReadInConfig(); err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
@@ -75,12 +77,18 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse server.defaultHeartbeatInterval: %w", err)
 	}
 
+	activeTimeout, err := time.ParseDuration(raw.Server.ActiveTimeout)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse server.activeTimeout: %w", err)
+	}
+
 	return Config{
 		SourcePath: v.ConfigFileUsed(),
 		Server: ServerConfig{
 			Port:                     raw.Server.Port,
 			SubnetBroadcast:          raw.Server.SubnetBroadcast,
 			DefaultHeartbeatInterval: interval,
+			ActiveTimeout:            activeTimeout,
 			TelegramToken:            raw.Server.TelegramToken,
 			AllowedTelegramUsers:     raw.Server.AllowedTelegramUsers,
 		},
@@ -101,6 +109,10 @@ func (c *Config) ValidateServer() error {
 
 	if c.Server.DefaultHeartbeatInterval <= 0 {
 		errs = append(errs, errors.New("server.defaultHeartbeatInterval must be greater than 0"))
+	}
+
+	if c.Server.ActiveTimeout <= 0 {
+		errs = append(errs, errors.New("server.activeTimeout must be greater than 0"))
 	}
 
 	if c.Server.TelegramToken != "" && len(c.Server.AllowedTelegramUsers) == 0 {
@@ -128,12 +140,4 @@ func (c *Config) ValidateServer() error {
 	}
 
 	return errors.Join(errs...)
-}
-
-func RegistryPath(sourcePath string) string {
-	if sourcePath == "" {
-		return "hosts.yaml"
-	}
-
-	return filepath.Join(filepath.Dir(sourcePath), "hosts.yaml")
 }

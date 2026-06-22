@@ -27,6 +27,18 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *App) handleAddHostPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if _, err := w.Write(a.addHostHTML); err != nil {
+		a.logger.Error("write add-host response", err)
+	}
+}
+
 func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -103,7 +115,7 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.logger.Info("sent magic packet", "mac", host.MAC, "hostname", host.Hostname, "broadcast", a.cfg.SubnetBroadcast)
-	a.writeJSON(w, http.StatusOK, hostStatus{HostRecord: host, Active: host.LastSeen.After(time.Now().Add(-activeWindow))})
+	a.writeJSON(w, http.StatusOK, hostStatus{HostRecord: host, Active: host.LastSeen.After(time.Now().Add(-a.cfg.ActiveTimeout))})
 }
 
 func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +126,7 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	records := a.registry.List()
 	hosts := make([]hostStatus, 0, len(records))
-	cutoff := time.Now().Add(-activeWindow)
+	cutoff := time.Now().Add(-a.cfg.ActiveTimeout)
 	for _, host := range records {
 		hosts = append(hosts, hostStatus{HostRecord: host, Active: host.LastSeen.After(cutoff)})
 	}
@@ -175,7 +187,7 @@ func (a *App) List() string {
 		return "No registered hosts."
 	}
 
-	cutoff := time.Now().Add(-activeWindow)
+	cutoff := time.Now().Add(-a.cfg.ActiveTimeout)
 	var builder strings.Builder
 	builder.WriteString("Registered hosts:\n")
 	for _, host := range hosts {
@@ -201,4 +213,87 @@ func (a *App) Wake(target string) string {
 		return "Failed to send Wake-on-LAN packet."
 	}
 	return fmt.Sprintf("Sent wake signal to %s (%s).", host.Hostname, host.MAC)
+}
+
+func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req registerRequest
+	if err := a.decodeJSON(r, &req); err != nil {
+		a.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	mac, err := internalwol.NormalizeMAC(req.MAC)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		return
+	}
+
+	if req.Hostname == "" {
+		req.Hostname = mac
+	}
+
+	ip := net.ParseIP(req.IP)
+	if ip == nil || ip.To4() == nil {
+		a.writeError(w, http.StatusBadRequest, "invalid IPv4 address")
+		return
+	}
+
+	host := HostRecord{
+		MAC:      mac,
+		Hostname: strings.TrimSpace(req.Hostname),
+		IP:       ip.String(),
+		LastSeen: time.Now().UTC(),
+	}
+	if err := a.registry.Upsert(host); err != nil {
+		a.logger.Error("persist host addition", err, "mac", mac)
+		a.writeError(w, http.StatusInternalServerError, "failed to store host")
+		return
+	}
+
+	a.logger.Info("added host", "mac", host.MAC, "hostname", host.Hostname, "ip", host.IP)
+	a.writeJSON(w, http.StatusOK, hostStatus{
+		HostRecord:        host,
+		Active:            true,
+		HeartbeatInterval: a.cfg.DefaultHeartbeatInterval.String(),
+	})
+}
+
+func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Extract MAC from path: /hosts/{mac}
+	mac := strings.TrimSpace(r.PathValue("mac"))
+	if mac == "" {
+		a.writeError(w, http.StatusBadRequest, "MAC address is required")
+		return
+	}
+
+	normalized, err := internalwol.NormalizeMAC(mac)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		return
+	}
+
+	// Check host exists before deleting
+	if _, ok := a.registry.FindByMAC(normalized); !ok {
+		a.writeError(w, http.StatusNotFound, "host not found")
+		return
+	}
+
+	if err := a.registry.Delete(normalized); err != nil {
+		a.logger.Error("delete host", err, "mac", normalized)
+		a.writeError(w, http.StatusInternalServerError, "failed to delete host")
+		return
+	}
+
+	a.logger.Info("deleted host", "mac", normalized)
+	a.writeJSON(w, http.StatusOK, map[string]string{"message": "host deleted"})
 }

@@ -74,6 +74,47 @@ func New(opts Options, logger *appservice.Logger) *App {
 	}
 }
 
+// PreCheck validates agent configuration before running
+func (a *App) PreCheck(ctx context.Context) error {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("lookup hostname: %w", err)
+	}
+
+	for _, upstream := range a.opts.Upstreams {
+		ipAddress, err := resolveLocalIP(strings.TrimSpace(upstream))
+		if err != nil {
+			return fmt.Errorf("resolve local IP for %s: %w", upstream, err)
+		}
+
+		macAddress, err := resolveLocalMAC(ipAddress)
+		if err != nil {
+			// Provide detailed diagnostic information
+			interfaces, _ := net.Interfaces()
+			var diagInfo strings.Builder
+			diagInfo.WriteString("\nAvailable network interfaces:\n")
+			for _, iface := range interfaces {
+				addrs, _ := iface.Addrs()
+				diagInfo.WriteString(fmt.Sprintf("  - %s (flags: %v, MAC: %s, Up: %v, Loopback: %v)\n",
+					iface.Name,
+					iface.Flags,
+					iface.HardwareAddr.String(),
+					iface.Flags&net.FlagUp != 0,
+					iface.Flags&net.FlagLoopback != 0,
+				))
+				for _, addr := range addrs {
+					diagInfo.WriteString(fmt.Sprintf("    - %s\n", addr.String()))
+				}
+			}
+			return fmt.Errorf("resolve local MAC for upstream %s (IP: %s): %w%s", upstream, ipAddress, err, diagInfo.String())
+		}
+
+		a.logger.Info("pre-check passed", "hostname", hostname, "mac", macAddress, "ip", ipAddress)
+	}
+
+	return nil
+}
+
 func (a *App) Run(ctx context.Context) error {
 	backoff := time.Duration(0)
 	for {
@@ -252,7 +293,7 @@ func resolveLocalIP(serverURL string) (string, error) {
 			_ = conn.Close()
 		}()
 		udpAddr, ok := conn.LocalAddr().(*net.UDPAddr)
-		if ok && udpAddr.IP != nil {
+		if ok && udpAddr.IP != nil && !udpAddr.IP.IsLoopback() {
 			return udpAddr.IP.String(), nil
 		}
 	}
@@ -302,6 +343,7 @@ func resolveLocalMAC(ipAddress string) (string, error) {
 		return "", err
 	}
 
+	// First pass: look for interface with matching IP
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -326,7 +368,33 @@ func resolveLocalMAC(ipAddress string) (string, error) {
 		}
 	}
 
+	// Fallback: if target IP is loopback/link-local, try to find any interface with HardwareAddr
+	// This handles cases where local IP resolution might return 127.0.0.1 or similar
+	if target.IsLoopback() || target.IsLinkLocalUnicast() {
+		for _, iface := range interfaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			if len(iface.HardwareAddr) != 0 {
+				// Return the first non-loopback, up interface with a hardware address
+				return internalwol.NormalizeMAC(iface.HardwareAddr.String())
+			}
+		}
+	}
+
 	return "", errors.New("unable to resolve local interface MAC")
+}
+
+func normalizeUpstreamURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return trimmed
+	}
+	// If no scheme, default to http://
+	if !strings.Contains(trimmed, "://") {
+		trimmed = "http://" + trimmed
+	}
+	return trimmed
 }
 
 func ParseUpstreams(raw []string) []string {
@@ -335,9 +403,9 @@ func ParseUpstreams(raw []string) []string {
 		for _, part := range strings.FieldsFunc(value, func(r rune) bool {
 			return r == ',' || r == ' ' || r == '\t' || r == '\n'
 		}) {
-			trimmed := strings.TrimSpace(part)
-			if trimmed != "" {
-				parts = append(parts, trimmed)
+			normalized := normalizeUpstreamURL(part)
+			if normalized != "" {
+				parts = append(parts, normalized)
 			}
 		}
 	}
