@@ -3,8 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,31 +17,33 @@ const defaultConfigFile = "config.yaml"
 type Config struct {
 	SourcePath string
 	Server     ServerConfig
-	Client     ClientConfig
+	Hosts      []HostConfig
 }
 
 type ServerConfig struct {
-	Port                 int
-	SubnetBroadcast      string
-	TelegramToken        string
-	AllowedTelegramUsers []int64
+	Port                     int
+	SubnetBroadcast          string
+	DefaultHeartbeatInterval time.Duration
+	TelegramToken            string
+	AllowedTelegramUsers     []int64
 }
 
-type ClientConfig struct {
-	ServerURL         string
-	MACAddress        string
-	HeartbeatInterval time.Duration
+type HostConfig struct {
+	Hostname string `mapstructure:"hostname"`
+	MAC      string `mapstructure:"mac"`
 }
 
 type rawConfig struct {
-	Server ServerConfig    `mapstructure:"server"`
-	Client rawClientConfig `mapstructure:"client"`
+	Server rawServerConfig `mapstructure:"server"`
+	Hosts  []HostConfig    `mapstructure:"hosts"`
 }
 
-type rawClientConfig struct {
-	ServerURL         string `mapstructure:"serverURL"`
-	MACAddress        string `mapstructure:"macAddress"`
-	HeartbeatInterval string `mapstructure:"heartbeatInterval"`
+type rawServerConfig struct {
+	Port                     int     `mapstructure:"port"`
+	SubnetBroadcast          string  `mapstructure:"subnetBroadcast"`
+	DefaultHeartbeatInterval string  `mapstructure:"defaultHeartbeatInterval"`
+	TelegramToken            string  `mapstructure:"telegramToken"`
+	AllowedTelegramUsers     []int64 `mapstructure:"allowedTelegramUsers"`
 }
 
 func DefaultPath() string {
@@ -59,7 +59,7 @@ func Load(path string) (Config, error) {
 	v.SetConfigFile(path)
 	v.SetConfigType("yaml")
 	v.SetDefault("server.port", 8080)
-	v.SetDefault("client.heartbeatInterval", "30s")
+	v.SetDefault("server.defaultHeartbeatInterval", "30s")
 
 	if err := v.ReadInConfig(); err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
@@ -70,23 +70,21 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	interval, err := time.ParseDuration(raw.Client.HeartbeatInterval)
-	if err != nil && raw.Client.HeartbeatInterval != "" {
-		return Config{}, fmt.Errorf("parse client heartbeat interval: %w", err)
-	}
-
-	if raw.Client.HeartbeatInterval == "" {
-		interval = 30 * time.Second
+	interval, err := time.ParseDuration(raw.Server.DefaultHeartbeatInterval)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse server.defaultHeartbeatInterval: %w", err)
 	}
 
 	return Config{
 		SourcePath: v.ConfigFileUsed(),
-		Server:     raw.Server,
-		Client: ClientConfig{
-			ServerURL:         raw.Client.ServerURL,
-			MACAddress:        raw.Client.MACAddress,
-			HeartbeatInterval: interval,
+		Server: ServerConfig{
+			Port:                     raw.Server.Port,
+			SubnetBroadcast:          raw.Server.SubnetBroadcast,
+			DefaultHeartbeatInterval: interval,
+			TelegramToken:            raw.Server.TelegramToken,
+			AllowedTelegramUsers:     raw.Server.AllowedTelegramUsers,
 		},
+		Hosts: raw.Hosts,
 	}, nil
 }
 
@@ -94,11 +92,15 @@ func (c *Config) ValidateServer() error {
 	var errs []error
 
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
-		errs = append(errs, fmt.Errorf("server.port must be between 1 and 65535"))
+		errs = append(errs, errors.New("server.port must be between 1 and 65535"))
 	}
 
 	if err := internalwol.ValidateBroadcast(c.Server.SubnetBroadcast); err != nil {
 		errs = append(errs, fmt.Errorf("server.subnetBroadcast: %w", err))
+	}
+
+	if c.Server.DefaultHeartbeatInterval <= 0 {
+		errs = append(errs, errors.New("server.defaultHeartbeatInterval must be greater than 0"))
 	}
 
 	if c.Server.TelegramToken != "" && len(c.Server.AllowedTelegramUsers) == 0 {
@@ -112,25 +114,17 @@ func (c *Config) ValidateServer() error {
 		}
 	}
 
-	return errors.Join(errs...)
-}
-
-func (c *Config) ValidateClient() error {
-	var errs []error
-
-	if _, err := resolveHTTPURL(c.Client.ServerURL); err != nil {
-		errs = append(errs, fmt.Errorf("client.serverURL: %w", err))
-	}
-
-	normalizedMAC, err := internalwol.NormalizeMAC(c.Client.MACAddress)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("client.macAddress: %w", err))
-	} else {
-		c.Client.MACAddress = normalizedMAC
-	}
-
-	if c.Client.HeartbeatInterval <= 0 {
-		errs = append(errs, errors.New("client.heartbeatInterval must be greater than 0"))
+	for i, host := range c.Hosts {
+		hostPath := fmt.Sprintf("hosts[%d]", i)
+		if strings.TrimSpace(host.Hostname) == "" {
+			errs = append(errs, fmt.Errorf("%s.hostname must not be empty", hostPath))
+		}
+		normalized, err := internalwol.NormalizeMAC(host.MAC)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s.mac: %w", hostPath, err))
+			continue
+		}
+		c.Hosts[i].MAC = normalized
 	}
 
 	return errors.Join(errs...)
@@ -142,34 +136,4 @@ func RegistryPath(sourcePath string) string {
 	}
 
 	return filepath.Join(filepath.Dir(sourcePath), "hosts.yaml")
-}
-
-func resolveHTTPURL(raw string) (*url.URL, error) {
-	if strings.TrimSpace(raw) == "" {
-		return nil, errors.New("must not be empty")
-	}
-
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return nil, err
-	}
-
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, errors.New("must use http or https")
-	}
-
-	if parsed.Host == "" {
-		return nil, errors.New("host is required")
-	}
-
-	host := parsed.Hostname()
-	if host == "" {
-		return nil, errors.New("hostname is required")
-	}
-
-	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
-		return nil, errors.New("only IPv4 server hosts are supported")
-	}
-
-	return parsed, nil
 }

@@ -15,71 +15,55 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: '1.24.2'
-      - uses: golangci/golangci-lint-action@v8
-        with:
-          version: latest
-          args: --timeout=5m --enable=errcheck --enable=unused
+          go-version-file: go.mod
+      - run: go mod download
+      - run: go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run --timeout=5m --enable=errcheck --enable=unused
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: '1.24.2'
+          go-version-file: go.mod
       - run: go mod download
       - run: go test ./...
 
   build:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: linux
-            arch: amd64
-            ext: ""
-          - os: linux
-            arch: arm64
-            ext: ""
-          - os: windows
-            arch: amd64
-            ext: ".exe"
-          - os: darwin
-            arch: amd64
-            ext: ""
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.2'
-      - run: go mod download
-      - name: Build agent
-        run: mkdir -p dist && GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -ldflags="-s -w" -o dist/wol-agent-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} ./cmd/agent
-      - name: Build server
-        run: GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -ldflags="-s -w" -o dist/wol-server-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} ./cmd/server
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/*
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs:
       - lint
       - test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go mod download
+      - run: go install github.com/go-task/task/v3/cmd/task@latest
+      - run: "$(go env GOPATH)/bin/task" assets:sync
+      - run: "$(go env GOPATH)/bin/task" build:release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: dist/*
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs:
       - build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
+          name: release-binaries
           path: dist
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/**/*
+          files: dist/*

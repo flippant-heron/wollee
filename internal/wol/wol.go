@@ -73,7 +73,9 @@ func SendMagicPacket(mac string, broadcast string) error {
 	if err != nil {
 		return fmt.Errorf("dial udp broadcast address: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	if _, err := conn.Write(payload); err != nil {
 		return fmt.Errorf("write magic packet: %w", err)

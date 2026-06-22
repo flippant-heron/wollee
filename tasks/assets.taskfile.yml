@@ -1,0 +1,16 @@
+version: '3'
+
+tasks:
+  sync:
+    desc: Download embedded web assets from npm package distributions
+    cmds:
+      - mkdir -p web/static
+      - >-
+        tmp_dir="$(mktemp -d)" &&
+        cd "$tmp_dir" &&
+        npm pack alpinejs@{{.ALPINE_VERSION}} @picocss/pico@{{.PICO_VERSION}} &&
+        mkdir alpinejs picocss &&
+        tar -xzf alpinejs-{{.ALPINE_VERSION}}.tgz -C alpinejs &&
+        tar -xzf picocss-pico-{{.PICO_VERSION}}.tgz -C picocss &&
+        cp alpinejs/package/dist/cdn.min.js /home/runner/work/wollee/wollee/web/static/alpine.min.js &&
+        cp picocss/package/css/pico.min.css /home/runner/work/wollee/wollee/web/static/pico.min.css

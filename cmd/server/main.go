@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	kservice "github.com/kardianos/service"
 	"github.com/spf13/cobra"
@@ -11,6 +13,12 @@ import (
 	"github.com/flippant-heron/wollee/internal/server"
 	appservice "github.com/flippant-heron/wollee/internal/service"
 )
+
+type serverRuntime struct {
+	service kservice.Service
+	program *appservice.Program
+	logger  *appservice.Logger
+}
 
 func main() {
 	if err := newRootCommand().Execute(); err != nil {
@@ -50,48 +58,51 @@ func newServerServiceCommand(action string, configPath *string) *cobra.Command {
 		Use:   action,
 		Short: action + " the native service",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			svc, _, _, err := buildServerService(*configPath)
+			runtime, err := buildServerService(*configPath)
 			if err != nil {
 				return err
 			}
-			return kservice.Control(svc, action)
+			return kservice.Control(runtime.service, action)
 		},
 	}
 }
 
 func runServer(configPath string) error {
-	svc, _, _, err := buildServerService(configPath)
+	runtime, err := buildServerService(configPath)
 	if err != nil {
 		return err
 	}
-	return svc.Run()
+	return runtime.service.Run()
 }
 
-func buildServerService(configPath string) (kservice.Service, *appservice.Program, *appservice.Logger, error) {
+func buildServerService(configPath string) (*serverRuntime, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if err := cfg.ValidateServer(); err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	registry, err := server.OpenRegistry(config.RegistryPath(cfg.SourcePath))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
+	}
+	if err := seedRegistry(registry, cfg.Hosts); err != nil {
+		return nil, err
 	}
 
 	interactive := kservice.Interactive()
 	logger := appservice.NewLogger(interactive)
 	runner, err := server.New(cfg.Server, registry, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	program := appservice.NewProgram(runner, logger)
 
 	absConfigPath, err := filepath.Abs(configPath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	svc, err := kservice.New(program, &kservice.Config{
@@ -101,7 +112,7 @@ func buildServerService(configPath string) (kservice.Service, *appservice.Progra
 		Arguments:   []string{"run", "--config", absConfigPath},
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	if !interactive {
@@ -111,5 +122,24 @@ func buildServerService(configPath string) (kservice.Service, *appservice.Progra
 		}
 	}
 
-	return svc, program, logger, nil
+	return &serverRuntime{service: svc, program: program, logger: logger}, nil
+}
+
+func seedRegistry(registry *server.Registry, hosts []config.HostConfig) error {
+	for _, host := range hosts {
+		record, exists := registry.FindByMAC(host.MAC)
+		if exists {
+			if strings.TrimSpace(record.Hostname) == "" {
+				record.Hostname = host.Hostname
+			}
+			if err := registry.Upsert(record); err != nil {
+				return fmt.Errorf("seed host %s: %w", host.MAC, err)
+			}
+			continue
+		}
+		if err := registry.Upsert(server.HostRecord{Hostname: host.Hostname, MAC: host.MAC}); err != nil {
+			return fmt.Errorf("seed host %s: %w", host.MAC, err)
+		}
+	}
+	return nil
 }

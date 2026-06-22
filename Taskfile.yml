@@ -1,8 +1,26 @@
 version: '3'
 
+vars:
+  ALPINE_VERSION: 3.15.12
+  PICO_VERSION: 2.1.1
+
+includes:
+  assets: ./tasks/assets.taskfile.yml
+  build: ./tasks/build.taskfile.yml
+
 tasks:
-  assets:
-    desc: Download embedded web assets from CDN
+  test:
+    desc: Run unit tests
     cmds:
-      - mkdir -p web/static
-      - tmp_dir="$(mktemp -d)" && cd "$tmp_dir" && npm pack alpinejs@3.15.12 @picocss/pico@2.1.1 && mkdir alpinejs picocss && tar -xzf alpinejs-3.15.12.tgz -C alpinejs && tar -xzf picocss-pico-2.1.1.tgz -C picocss && cp alpinejs/package/dist/cdn.min.js /home/runner/work/wollee/wollee/web/static/alpine.min.js && cp picocss/package/css/pico.min.css /home/runner/work/wollee/wollee/web/static/pico.min.css
+      - go test ./...
+
+  lint:
+    desc: Run lint checks
+    cmds:
+      - go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run --timeout=5m --enable=errcheck --enable=unused
+
+  build:local:
+    desc: Build local binaries
+    cmds:
+      - go build ./cmd/agent
+      - go build ./cmd/server
