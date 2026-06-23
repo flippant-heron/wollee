@@ -6,14 +6,14 @@ import (
 	"os"
 	"sync"
 
-	kservice "github.com/kardianos/service"
+	sysservice "github.com/kardianos/service"
 )
 
 type Logger struct {
 	mu          sync.RWMutex
 	interactive bool
 	stdout      *slog.Logger
-	service     kservice.Logger
+	service     sysservice.Logger
 }
 
 func NewLogger(interactive bool) *Logger {
@@ -25,7 +25,7 @@ func NewLogger(interactive bool) *Logger {
 	}
 }
 
-func (l *Logger) SetServiceLogger(logger kservice.Logger) {
+func (l *Logger) SetServiceLogger(logger sysservice.Logger) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.service = logger

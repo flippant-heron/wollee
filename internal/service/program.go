@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	kservice "github.com/kardianos/service"
+	sysservice "github.com/kardianos/service"
 )
 
 type Runner interface {
@@ -29,7 +29,7 @@ func NewProgram(runner Runner, logger *Logger) *Program {
 	}
 }
 
-func (p *Program) Start(_ kservice.Service) error {
+func (p *Program) Start(_ sysservice.Service) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -55,7 +55,7 @@ func (p *Program) Start(_ kservice.Service) error {
 	return nil
 }
 
-func (p *Program) Stop(_ kservice.Service) error {
+func (p *Program) Stop(_ sysservice.Service) error {
 	p.mu.Lock()
 	cancel := p.cancel
 	done := p.done
