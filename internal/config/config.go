@@ -20,12 +20,13 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port                     int
-	SubnetBroadcast          string
-	DefaultHeartbeatInterval time.Duration
-	ActiveTimeout            time.Duration
-	TelegramToken            string
-	AllowedTelegramUsers     []int64
+	Port          int
+	Network       string
+	Heartbeat     time.Duration
+	Timeout       time.Duration
+	ConfigRefresh time.Duration
+	Token         string
+	Users         []int64
 }
 
 type HostConfig struct {
@@ -39,12 +40,13 @@ type rawConfig struct {
 }
 
 type rawServerConfig struct {
-	Port                     int     `mapstructure:"port"`
-	SubnetBroadcast          string  `mapstructure:"subnetBroadcast"`
-	DefaultHeartbeatInterval string  `mapstructure:"defaultHeartbeatInterval"`
-	ActiveTimeout            string  `mapstructure:"activeTimeout"`
-	TelegramToken            string  `mapstructure:"telegramToken"`
-	AllowedTelegramUsers     []int64 `mapstructure:"allowedTelegramUsers"`
+	Port          int     `mapstructure:"port"`
+	Network       string  `mapstructure:"network"`
+	Heartbeat     string  `mapstructure:"heartbeat"`
+	Timeout       string  `mapstructure:"timeout"`
+	ConfigRefresh string  `mapstructure:"configRefresh"`
+	Token         string  `mapstructure:"token"`
+	Users         []int64 `mapstructure:"users"`
 }
 
 func DefaultPath() string {
@@ -60,8 +62,9 @@ func Load(path string) (Config, error) {
 	v.SetConfigFile(path)
 	v.SetConfigType("yaml")
 	v.SetDefault("server.port", 8080)
-	v.SetDefault("server.defaultHeartbeatInterval", "30s")
-	v.SetDefault("server.activeTimeout", "5m")
+	v.SetDefault("server.heartbeat", "30s")
+	v.SetDefault("server.timeout", "5m")
+	v.SetDefault("server.configRefresh", "5m")
 
 	if err := v.ReadInConfig(); err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
@@ -72,25 +75,31 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	interval, err := time.ParseDuration(raw.Server.DefaultHeartbeatInterval)
+	interval, err := time.ParseDuration(raw.Server.Heartbeat)
 	if err != nil {
-		return Config{}, fmt.Errorf("parse server.defaultHeartbeatInterval: %w", err)
+		return Config{}, fmt.Errorf("parse server.heartbeat: %w", err)
 	}
 
-	activeTimeout, err := time.ParseDuration(raw.Server.ActiveTimeout)
+	timeout, err := time.ParseDuration(raw.Server.Timeout)
 	if err != nil {
-		return Config{}, fmt.Errorf("parse server.activeTimeout: %w", err)
+		return Config{}, fmt.Errorf("parse server.timeout: %w", err)
+	}
+
+	cfgRefresh, err := time.ParseDuration(raw.Server.ConfigRefresh)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse server.configRefresh: %w", err)
 	}
 
 	return Config{
 		SourcePath: v.ConfigFileUsed(),
 		Server: ServerConfig{
-			Port:                     raw.Server.Port,
-			SubnetBroadcast:          raw.Server.SubnetBroadcast,
-			DefaultHeartbeatInterval: interval,
-			ActiveTimeout:            activeTimeout,
-			TelegramToken:            raw.Server.TelegramToken,
-			AllowedTelegramUsers:     raw.Server.AllowedTelegramUsers,
+			Port:          raw.Server.Port,
+			Network:       raw.Server.Network,
+			Heartbeat:     interval,
+			Timeout:       timeout,
+			ConfigRefresh: cfgRefresh,
+			Token:         raw.Server.Token,
+			Users:         raw.Server.Users,
 		},
 		Hosts: raw.Hosts,
 	}, nil
@@ -103,25 +112,29 @@ func (c *Config) ValidateServer() error {
 		errs = append(errs, errors.New("server.port must be between 1 and 65535"))
 	}
 
-	if err := internalwol.ValidateBroadcast(c.Server.SubnetBroadcast); err != nil {
-		errs = append(errs, fmt.Errorf("server.subnetBroadcast: %w", err))
+	if err := internalwol.ValidateBroadcast(c.Server.Network); err != nil {
+		errs = append(errs, fmt.Errorf("server.network: %w", err))
 	}
 
-	if c.Server.DefaultHeartbeatInterval <= 0 {
-		errs = append(errs, errors.New("server.defaultHeartbeatInterval must be greater than 0"))
+	if c.Server.Heartbeat <= 0 {
+		errs = append(errs, errors.New("server.heartbeat must be greater than 0"))
 	}
 
-	if c.Server.ActiveTimeout <= 0 {
-		errs = append(errs, errors.New("server.activeTimeout must be greater than 0"))
+	if c.Server.Timeout <= 0 {
+		errs = append(errs, errors.New("server.timeout must be greater than 0"))
 	}
 
-	if c.Server.TelegramToken != "" && len(c.Server.AllowedTelegramUsers) == 0 {
-		errs = append(errs, errors.New("server.allowedTelegramUsers must contain at least one user when telegramToken is set"))
+	if c.Server.ConfigRefresh <= 0 {
+		errs = append(errs, errors.New("server.configRefresh must be greater than 0"))
 	}
 
-	for _, userID := range c.Server.AllowedTelegramUsers {
+	if c.Server.Token != "" && len(c.Server.Users) == 0 {
+		errs = append(errs, errors.New("server.users must contain at least one user when token is set"))
+	}
+
+	for _, userID := range c.Server.Users {
 		if userID == 0 {
-			errs = append(errs, errors.New("server.allowedTelegramUsers cannot contain 0"))
+			errs = append(errs, errors.New("server.users cannot contain 0"))
 			break
 		}
 	}

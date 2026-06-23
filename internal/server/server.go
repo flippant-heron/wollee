@@ -51,11 +51,12 @@ type hostStatus struct {
 }
 
 type serverSettingsRequest struct {
-	SubnetBroadcast          string  `json:"subnetBroadcast"`
-	DefaultHeartbeatInterval string  `json:"defaultHeartbeatInterval"`
-	ActiveTimeout            string  `json:"activeTimeout"`
-	TelegramToken            string  `json:"telegramToken"`
-	AllowedTelegramUsers     []int64 `json:"allowedTelegramUsers"`
+	Network       string  `json:"network"`
+	Heartbeat     string  `json:"heartbeat"`
+	Timeout       string  `json:"timeout"`
+	ConfigRefresh string  `json:"configRefresh"`
+	Token         string  `json:"token"`
+	Users         []int64 `json:"users"`
 }
 
 type settingsUpdateRequest struct {
@@ -63,11 +64,12 @@ type settingsUpdateRequest struct {
 }
 
 type settingsResponse struct {
-	SubnetBroadcast          string  `json:"subnetBroadcast"`
-	DefaultHeartbeatInterval string  `json:"defaultHeartbeatInterval"`
-	ActiveTimeout            string  `json:"activeTimeout"`
-	TelegramTokenSet         bool    `json:"telegramTokenSet"`
-	AllowedTelegramUsers     []int64 `json:"allowedTelegramUsers"`
+	Network       string  `json:"network"`
+	Heartbeat     string  `json:"heartbeat"`
+	Timeout       string  `json:"timeout"`
+	ConfigRefresh string  `json:"configRefresh"`
+	TokenSet      bool    `json:"tokenSet"`
+	Users         []int64 `json:"users"`
 }
 
 func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) (*App, error) {
@@ -115,7 +117,7 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 		settingsHTML: settingsHTML,
 	}
 
-	app.telegram = telegram.New(cfg.TelegramToken, cfg.AllowedTelegramUsers, app, logger)
+	app.telegram = telegram.New(cfg.Token, cfg.Users, app, logger)
 	return app, nil
 }
 
@@ -134,7 +136,7 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
-	a.logger.Info("starting server", "port", cfg.Port, "broadcast", cfg.SubnetBroadcast)
+	a.logger.Info("starting server", "port", cfg.Port, "broadcast", cfg.Network)
 
 	// Start periodic config reload (every 300 seconds)
 	a.reloadTicker = time.NewTicker(300 * time.Second)
@@ -170,14 +172,14 @@ func (a *App) reloadConfig() error {
 	newCfg := a.cfgMgr.Get()
 
 	// If telegram settings changed, restart the telegram service
-	if oldCfg.TelegramToken != newCfg.TelegramToken ||
-		!eqInt64Slices(oldCfg.AllowedTelegramUsers, newCfg.AllowedTelegramUsers) {
+	if oldCfg.Token != newCfg.Token ||
+		!eqInt64Slices(oldCfg.Users, newCfg.Users) {
 		// Stop the old telegram service
 		a.telegramCancel()
 		a.telegram.Shutdown()
 
 		// Create a new telegram service with updated config
-		a.telegram = telegram.New(newCfg.TelegramToken, newCfg.AllowedTelegramUsers, a, a.logger)
+		a.telegram = telegram.New(newCfg.Token, newCfg.Users, a, a.logger)
 
 		// Create a new context for the telegram service (child of the main context through Run())
 		// We create a new child context since the old one was cancelled

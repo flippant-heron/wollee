@@ -14,8 +14,8 @@ func TestLoadAndValidateServerConfig(t *testing.T) {
 	path := filepath.Join(dir, "config.yaml")
 	content := []byte(`server:
   port: 8080
-  subnetBroadcast: 192.168.1.255
-  defaultHeartbeatInterval: 45s
+  network: 192.168.1.255
+  heartbeat: 45s
 hosts:
   - hostname: desktop
     mac: 00-11-22-33-44-55
@@ -34,8 +34,8 @@ hosts:
 		t.Fatalf("ValidateServer() error = %v", err)
 	}
 
-	if cfg.Server.DefaultHeartbeatInterval != 45*time.Second {
-		t.Fatalf("unexpected heartbeat interval: %s", cfg.Server.DefaultHeartbeatInterval)
+	if cfg.Server.Heartbeat != 45*time.Second {
+		t.Fatalf("unexpected heartbeat interval: %s", cfg.Server.Heartbeat)
 	}
 
 	if len(cfg.Hosts) != 1 || cfg.Hosts[0].MAC != "00:11:22:33:44:55" {
@@ -48,10 +48,10 @@ func TestValidateServerRejectsInvalidConfig(t *testing.T) {
 
 	cfg := Config{
 		Server: ServerConfig{
-			Port:                     0,
-			SubnetBroadcast:          "bad-ip",
-			DefaultHeartbeatInterval: 0,
-			TelegramToken:            "token",
+			Port:      0,
+			Network:   "bad-ip",
+			Heartbeat: 0,
+			Token:     "token",
 		},
 		Hosts: []HostConfig{{Hostname: "", MAC: "bad-mac"}},
 	}
@@ -68,9 +68,10 @@ func TestManagerUpdate(t *testing.T) {
 	path := filepath.Join(dir, "config.yaml")
 	content := []byte(`server:
   port: 8080
-  subnetBroadcast: 192.168.1.0/24
-  defaultHeartbeatInterval: 30s
-  activeTimeout: 5m
+  network: 192.168.1.0/24
+  heartbeat: 30s
+  timeout: 5m
+  configRefresh: 5m
 hosts:
   - hostname: desktop
     mac: 00:11:22:33:44:55
@@ -81,27 +82,29 @@ hosts:
 	}
 
 	initialCfg := ServerConfig{
-		Port:                     8080,
-		SubnetBroadcast:          "192.168.1.0/24",
-		DefaultHeartbeatInterval: 30 * time.Second,
-		ActiveTimeout:            5 * time.Minute,
+		Port:          8080,
+		Network:       "192.168.1.0/24",
+		Heartbeat:     30 * time.Second,
+		Timeout:       5 * time.Minute,
+		ConfigRefresh: 5 * time.Minute,
 	}
 
 	mgr := NewManager(path, initialCfg)
 
 	// Verify initial values
-	if got := mgr.Get(); got.SubnetBroadcast != "192.168.1.0/24" {
-		t.Fatalf("initial SubnetBroadcast = %q, want 192.168.1.0/24", got.SubnetBroadcast)
+	if got := mgr.Get(); got.Network != "192.168.1.0/24" {
+		t.Fatalf("initial Network = %q, want 192.168.1.0/24", got.Network)
 	}
 
 	// Update settings
 	newCfg := ServerConfig{
-		Port:                     8080,
-		SubnetBroadcast:          "10.0.0.0/8",
-		DefaultHeartbeatInterval: 60 * time.Second,
-		ActiveTimeout:            10 * time.Minute,
-		TelegramToken:            "test-token",
-		AllowedTelegramUsers:     []int64{123},
+		Port:          8080,
+		Network:       "10.0.0.0/8",
+		Heartbeat:     60 * time.Second,
+		Timeout:       10 * time.Minute,
+		ConfigRefresh: 5 * time.Minute,
+		Token:         "test-token",
+		Users:         []int64{123},
 	}
 
 	if err := mgr.Update(newCfg); err != nil {
@@ -109,8 +112,8 @@ hosts:
 	}
 
 	// Verify in-memory changes
-	if got := mgr.Get(); got.SubnetBroadcast != "10.0.0.0/8" {
-		t.Fatalf("after Update SubnetBroadcast = %q, want 10.0.0.0/8", got.SubnetBroadcast)
+	if got := mgr.Get(); got.Network != "10.0.0.0/8" {
+		t.Fatalf("after Update Network = %q, want 10.0.0.0/8", got.Network)
 	}
 
 	// Verify file was written with new values
@@ -119,12 +122,12 @@ hosts:
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.Server.SubnetBroadcast != "10.0.0.0/8" {
-		t.Fatalf("file SubnetBroadcast = %q, want 10.0.0.0/8", cfg.Server.SubnetBroadcast)
+	if cfg.Server.Network != "10.0.0.0/8" {
+		t.Fatalf("file Network = %q, want 10.0.0.0/8", cfg.Server.Network)
 	}
 
-	if cfg.Server.DefaultHeartbeatInterval != 60*time.Second {
-		t.Fatalf("file DefaultHeartbeatInterval = %v, want 60s", cfg.Server.DefaultHeartbeatInterval)
+	if cfg.Server.Heartbeat != 60*time.Second {
+		t.Fatalf("file Heartbeat = %v, want 60s", cfg.Server.Heartbeat)
 	}
 
 	// Verify hosts section was preserved

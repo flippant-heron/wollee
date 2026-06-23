@@ -4,13 +4,14 @@ hosts:
 
 server:
   port: 8080
-  subnetBroadcast: 192.168.1.0/24
-  defaultHeartbeatInterval: 30s
-  activeTimeout: 5m
+  network: 192.168.1.0/24
+  heartbeat: 30s
+  timeout: 5m
+  configRefresh: 5m
   # Optional: Telegram bot token from @BotFather (leave empty to disable)
-  telegramToken: ""
+  token: ""
   # Optional: List of Telegram user IDs authorized to use bot commands
   # Get your user ID by messaging your bot and sending /whoami
-  allowedTelegramUsers: []
+  users: []
     # - 123456789     # Your Telegram user ID
     # - 987654321     # Another authorized user (optional)

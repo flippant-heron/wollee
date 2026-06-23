@@ -21,14 +21,15 @@ hosts:
     mac: 00:11:22:33:44:55
 server:
   port: 8080
-  subnetBroadcast: 192.168.1.255
-  defaultHeartbeatInterval: 30s
-  activeTimeout: 5m
-  telegramToken: ""                    # Optional: Telegram bot token from @BotFather
-  allowedTelegramUsers: []             # Optional: Telegram user IDs authorized to use bot commands
+  network: 192.168.1.255
+  heartbeat: 30s
+  timeout: 5m
+  configRefresh: 5m
+  token: ""                    # Optional: Telegram bot token from @BotFather
+  users: []                    # Optional: Telegram user IDs authorized to use bot commands
 ```
 
-`defaultHeartbeatInterval` is returned by `/register` and controls downstream heartbeat cadence.
+`heartbeat` is returned by `/register` and controls downstream heartbeat cadence.
 
 Config is reloaded by default every 300 seconds (5 minutes) and will restart the telegram agent if changes to telegram config are detected. If changes are made you can also manually refresh the config via the `/config/reload` api endpoint or from the UI.
 
@@ -95,22 +96,22 @@ Agent:
    - Message [@BotFather](https://t.me/botfather) on Telegram
    - Send `/newbot` and follow the prompts
    - BotFather will provide you with a token (e.g., `123456789:ABCdefGHIjklmnoPQRstuvWXYZ1234567`)
-   - Set the token in the server settings page, or manually store this token securely in your `config.yaml` as `server.telegramToken`
+   - Set the token in the server settings page, or manually store this token securely in your `config.yaml` as `server.token`
    - Note that for security reasons, the server UI will only allow you to set the token when it is empty, and clearing it must be done by manually editing the config file.
    - Note that an `unauthorized` message on Telegram means it is connected and working, but your user ID hasn't been added to the whitelist
 
 2. **Discover your Telegram user ID**:
    - When your server is running and connected to Telegram, message your bot and send `/whoami`
    - The bot will reply with your user ID (e.g., `Your Telegram user ID is: 123456789`)
-   - Add the ID to the allowed user list in the settings, or to `server.allowedTelegramUsers` in your `config.yaml`
+   - Add the ID to the allowed user list in the settings, or to `server.users` in your `config.yaml`
    - Note that for the sake of simplicity, we haven't locked down the settings endpoint, so devices on your network can inject custom Telegram User Ids at will. You are responsible for the security of that endpoint.
 
 3. **Configuration example**:
 
    ```yaml
    server:
-     telegramToken: "123456789:ABCdefGHIjklmnoPQRstuvWXYZ1234567"
-     allowedTelegramUsers:
+     token: "123456789:ABCdefGHIjklmnoPQRstuvWXYZ1234567"
+     users:
        - 123456789    # Your Telegram user ID
        - 987654321    # Another authorized user's ID (optional)
    ```
@@ -124,9 +125,9 @@ Agent:
 
 ### Security Notes
 
-- **`allowedTelegramUsers`** is a whitelist that controls who can use the `/list` and `/wake` commands. Only Telegram user IDs in this list can execute these commands.
+- **`users`** is a whitelist that controls who can use the `/list` and `/wake` commands. Only Telegram user IDs in this list can execute these commands.
 - The `/whoami` command is always available to help users discover their ID
-- Keep your `telegramToken` private — anyone with this token can control your bot.
+- Keep your `token` private — anyone with this token can control your bot.
 - The token should be stored securely (e.g., environment variables, secrets management, or restricted file permissions).
 
 ## Development

@@ -48,21 +48,27 @@
         <h2>Server Settings</h2>
 
         <div class="field-group">
-          <label for="subnetBroadcast">Subnet Broadcast Address (CIDR)</label>
-          <input id="subnetBroadcast" type="text" x-model="settings.subnetBroadcast" placeholder="e.g., 192.168.1.0/24">
-          <p class="help-text">Network in CIDR notation for sending Wake-on-LAN packets (e.g., 192.168.1.0/24 or 10.0.0.0/8)</p>
+          <label for="network">Network Address (CIDR)</label>
+          <input id="network" type="text" x-model="settings.network" placeholder="e.g., 192.168.1.0/24">
+          <p class="help-text">Broadcast Network in CIDR notation for sending Wake-on-LAN packets (e.g., 192.168.1.0/24 or 10.0.0.0/8)</p>
         </div>
 
         <div class="field-group">
-          <label for="activeTimeout">Active Timeout</label>
-          <input id="activeTimeout" type="text" x-model="settings.activeTimeout" placeholder="e.g., 5m">
+          <label for="timeout">Timeout</label>
+          <input id="timeout" type="text" x-model="settings.timeout" placeholder="e.g., 5m">
           <p class="help-text">Duration to consider a host active after last seen (e.g., 5m, 1h, 30s)</p>
         </div>
 
         <div class="field-group">
-          <label for="defaultHeartbeatInterval">Default Heartbeat Interval</label>
-          <input id="defaultHeartbeatInterval" type="text" x-model="settings.defaultHeartbeatInterval" placeholder="e.g., 30s">
+          <label for="heartbeat">Heartbeat Interval</label>
+          <input id="heartbeat" type="text" x-model="settings.heartbeat" placeholder="e.g., 30s">
           <p class="help-text">Default interval for host heartbeats (e.g., 30s, 1m, 5m)</p>
+        </div>
+
+        <div class="field-group">
+          <label for="configRefresh">Config Refresh Interval</label>
+          <input id="configRefresh" type="text" x-model="settings.configRefresh" placeholder="e.g., 5m">
+          <p class="help-text">How often to reload configuration file (e.g., 5m, 1h, 30s)</p>
         </div>
       </div>
 
@@ -71,20 +77,20 @@
         <h2>Telegram Integration</h2>
 
         <div class="field-group">
-          <label for="telegramToken">Telegram Bot Token</label>
-          <template x-if="settings.telegramTokenSet">
+          <label for="token">Telegram Bot Token</label>
+          <template x-if="settings.tokenSet">
             <div class="token-status set">✓ Token is configured</div>
             <p class="help-text">Token is already configured. To change it, update the config.yaml file directly.</p>
           </template>
-          <template x-if="!settings.telegramTokenSet">
+          <template x-if="!settings.tokenSet">
             <div class="token-status notset">✗ No token configured</div>
-            <input id="telegramToken" type="password" x-model="newTelegramToken" placeholder="Enter your Telegram bot token">
+            <input id="token" type="password" x-model="newToken" placeholder="Enter your Telegram bot token">
             <p class="help-text">Your Telegram bot token from BotFather. This can only be set once.</p>
           </template>
         </div>
 
         <div class="field-group">
-          <label>Allowed Telegram Users</label>
+          <label>Authorized Users</label>
           <p class="help-text">Only these users can control the bot</p>
 
           <div class="input-row">
@@ -92,9 +98,9 @@
             <button type="button" @click="addUser()" :disabled="loading">Add User</button>
           </div>
 
-          <template x-if="settings.allowedTelegramUsers.length > 0">
+          <template x-if="settings.users.length > 0">
             <div class="user-list">
-              <template x-for="(userId, index) in settings.allowedTelegramUsers" :key="index">
+              <template x-for="(userId, index) in settings.users" :key="index">
                 <div class="user-item">
                   <span class="user-item-id" x-text="userId"></span>
                   <button type="button" class="secondary" @click="removeUser(index)" :disabled="loading">Remove</button>
@@ -102,7 +108,7 @@
               </template>
             </div>
           </template>
-          <template x-if="settings.allowedTelegramUsers.length === 0">
+          <template x-if="settings.users.length === 0">
             <p><em>No users configured</em></p>
           </template>
         </div>
@@ -123,14 +129,15 @@
     function settingsApp() {
       return {
         settings: {
-          subnetBroadcast: '',
-          activeTimeout: '5m',
-          defaultHeartbeatInterval: '30s',
-          telegramTokenSet: false,
-          allowedTelegramUsers: []
+          network: '',
+          timeout: '5m',
+          heartbeat: '30s',
+          configRefresh: '5m',
+          tokenSet: false,
+          users: []
         },
         originalSettings: null,
-        newTelegramToken: '',
+        newToken: '',
         newUserId: '',
         loading: false,
         error: '',
@@ -140,18 +147,20 @@
           // Check if any settings changed
           // Token can only be changed if not already set
           const currentSnapshot = {
-            subnetBroadcast: this.settings.subnetBroadcast,
-            activeTimeout: this.settings.activeTimeout,
-            defaultHeartbeatInterval: this.settings.defaultHeartbeatInterval,
-            allowedTelegramUsers: JSON.stringify(this.settings.allowedTelegramUsers),
-            newTelegramToken: this.settings.telegramTokenSet ? '' : this.newTelegramToken
+            network: this.settings.network,
+            timeout: this.settings.timeout,
+            heartbeat: this.settings.heartbeat,
+            configRefresh: this.settings.configRefresh,
+            users: JSON.stringify(this.settings.users),
+            newToken: this.settings.tokenSet ? '' : this.newToken
           };
           const originalSnapshot = {
-            subnetBroadcast: this.originalSettings.subnetBroadcast,
-            activeTimeout: this.originalSettings.activeTimeout,
-            defaultHeartbeatInterval: this.originalSettings.defaultHeartbeatInterval,
-            allowedTelegramUsers: JSON.stringify(this.originalSettings.allowedTelegramUsers),
-            newTelegramToken: ''
+            network: this.originalSettings.network,
+            timeout: this.originalSettings.timeout,
+            heartbeat: this.originalSettings.heartbeat,
+            configRefresh: this.originalSettings.configRefresh,
+            users: JSON.stringify(this.originalSettings.users),
+            newToken: ''
           };
           return JSON.stringify(currentSnapshot) !== JSON.stringify(originalSnapshot);
         },
@@ -170,14 +179,15 @@
             }
             const data = await response.json();
             this.settings = {
-              subnetBroadcast: data.subnetBroadcast || '',
-              activeTimeout: data.activeTimeout || '5m',
-              defaultHeartbeatInterval: data.defaultHeartbeatInterval || '30s',
-              telegramTokenSet: data.telegramTokenSet || false,
-              allowedTelegramUsers: data.allowedTelegramUsers || []
+              network: data.network || '',
+              timeout: data.timeout || '5m',
+              heartbeat: data.heartbeat || '30s',
+              configRefresh: data.configRefresh || '5m',
+              tokenSet: data.tokenSet || false,
+              users: data.users || []
             };
             this.originalSettings = JSON.parse(JSON.stringify(this.settings));
-            this.newTelegramToken = '';
+            this.newToken = '';
           } catch (error) {
             this.error = error.message;
           } finally {
@@ -192,11 +202,12 @@
           try {
             const payload = {
               settings: {
-                subnetBroadcast: this.settings.subnetBroadcast,
-                activeTimeout: this.settings.activeTimeout,
-                defaultHeartbeatInterval: this.settings.defaultHeartbeatInterval,
-                telegramToken: this.settings.telegramTokenSet ? '' : this.newTelegramToken,
-                allowedTelegramUsers: this.settings.allowedTelegramUsers
+                network: this.settings.network,
+                timeout: this.settings.timeout,
+                heartbeat: this.settings.heartbeat,
+                configRefresh: this.settings.configRefresh,
+                token: this.settings.tokenSet ? '' : this.newToken,
+                users: this.settings.users
               }
             };
             const response = await fetch('/api/settings', {
@@ -209,7 +220,7 @@
               throw new Error(payload.error || `Failed to save settings: ${response.status}`);
             }
             this.success = 'Settings saved successfully';
-            this.newTelegramToken = '';
+            this.newToken = '';
             await this.loadSettings();
             setTimeout(() => {
               this.success = '';
@@ -223,7 +234,7 @@
 
         resetSettings() {
           this.settings = JSON.parse(JSON.stringify(this.originalSettings));
-          this.newTelegramToken = '';
+          this.newToken = '';
           this.error = '';
           this.success = '';
         },
@@ -234,17 +245,17 @@
             this.error = 'Please enter a valid user ID';
             return;
           }
-          if (this.settings.allowedTelegramUsers.includes(userId)) {
+          if (this.settings.users.includes(userId)) {
             this.error = 'This user ID is already in the list';
             return;
           }
-          this.settings.allowedTelegramUsers.push(userId);
+          this.settings.users.push(userId);
           this.newUserId = '';
           this.error = '';
         },
 
         removeUser(index) {
-          this.settings.allowedTelegramUsers.splice(index, 1);
+          this.settings.users.splice(index, 1);
         }
       };
     }

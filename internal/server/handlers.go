@@ -85,7 +85,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, hostStatus{
 		HostRecord:        host,
 		Active:            true,
-		HeartbeatInterval: cfg.DefaultHeartbeatInterval.String(),
+		HeartbeatInterval: cfg.Heartbeat.String(),
 	})
 }
 
@@ -112,14 +112,14 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := a.cfgMgr.Get()
-	if err := internalwol.SendMagicPacket(host.MAC, cfg.SubnetBroadcast); err != nil {
-		a.logger.Error("send magic packet", err, "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.SubnetBroadcast)
+	if err := internalwol.SendMagicPacket(host.MAC, cfg.Network); err != nil {
+		a.logger.Error("send magic packet", err, "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
 		a.writeError(w, http.StatusBadGateway, "failed to send magic packet")
 		return
 	}
 
-	a.logger.Info("sent magic packet", "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.SubnetBroadcast)
-	a.writeJSON(w, http.StatusOK, hostStatus{HostRecord: host, Active: host.LastSeen.After(time.Now().Add(-cfg.ActiveTimeout))})
+	a.logger.Info("sent magic packet", "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
+	a.writeJSON(w, http.StatusOK, hostStatus{HostRecord: host, Active: host.LastSeen.After(time.Now().Add(-cfg.Timeout))})
 }
 
 func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +131,7 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := a.cfgMgr.Get()
 	records := a.registry.List()
 	hosts := make([]hostStatus, 0, len(records))
-	cutoff := time.Now().Add(-cfg.ActiveTimeout)
+	cutoff := time.Now().Add(-cfg.Timeout)
 	for _, host := range records {
 		hosts = append(hosts, hostStatus{HostRecord: host, Active: host.LastSeen.After(cutoff)})
 	}
@@ -193,7 +193,7 @@ func (a *App) List() string {
 		return "No registered hosts."
 	}
 
-	cutoff := time.Now().Add(-cfg.ActiveTimeout)
+	cutoff := time.Now().Add(-cfg.Timeout)
 	var builder strings.Builder
 	builder.WriteString("Registered hosts:\n")
 	for _, host := range hosts {
@@ -215,7 +215,7 @@ func (a *App) Wake(target string) string {
 		return err.Error()
 	}
 	cfg := a.cfgMgr.Get()
-	if err := internalwol.SendMagicPacket(host.MAC, cfg.SubnetBroadcast); err != nil {
+	if err := internalwol.SendMagicPacket(host.MAC, cfg.Network); err != nil {
 		a.logger.Error("send magic packet from telegram", err, "mac", host.MAC, "hostname", host.Hostname)
 		return "Failed to send Wake-on-LAN packet."
 	}
@@ -267,7 +267,7 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, hostStatus{
 		HostRecord:        host,
 		Active:            true,
-		HeartbeatInterval: cfg.DefaultHeartbeatInterval.String(),
+		HeartbeatInterval: cfg.Heartbeat.String(),
 	})
 }
 
@@ -351,11 +351,12 @@ func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 func (a *App) getSettings(w http.ResponseWriter, r *http.Request) {
 	cfg := a.cfgMgr.Get()
 	response := settingsResponse{
-		SubnetBroadcast:          cfg.SubnetBroadcast,
-		ActiveTimeout:            cfg.ActiveTimeout.String(),
-		DefaultHeartbeatInterval: cfg.DefaultHeartbeatInterval.String(),
-		TelegramTokenSet:         cfg.TelegramToken != "",
-		AllowedTelegramUsers:     cfg.AllowedTelegramUsers,
+		Network:       cfg.Network,
+		Heartbeat:     cfg.Heartbeat.String(),
+		Timeout:       cfg.Timeout.String(),
+		ConfigRefresh: cfg.ConfigRefresh.String(),
+		TokenSet:      cfg.Token != "",
+		Users:         cfg.Users,
 	}
 	a.writeJSON(w, http.StatusOK, response)
 }
@@ -370,53 +371,64 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 	// Validate and update settings
 	cfg := a.cfgMgr.Get()
 
-	if err := internalwol.ValidateBroadcast(req.Settings.SubnetBroadcast); err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid subnet broadcast: "+err.Error())
+	if err := internalwol.ValidateBroadcast(req.Settings.Network); err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid network: "+err.Error())
 		return
 	}
 
-	activeTimeout, err := time.ParseDuration(req.Settings.ActiveTimeout)
+	timeout, err := time.ParseDuration(req.Settings.Timeout)
 	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid activeTimeout: "+err.Error())
+		a.writeError(w, http.StatusBadRequest, "invalid timeout: "+err.Error())
 		return
 	}
-	if activeTimeout <= 0 {
-		a.writeError(w, http.StatusBadRequest, "activeTimeout must be greater than 0")
+	if timeout <= 0 {
+		a.writeError(w, http.StatusBadRequest, "timeout must be greater than 0")
 		return
 	}
 
-	heartbeatInterval, err := time.ParseDuration(req.Settings.DefaultHeartbeatInterval)
+	heartbeat, err := time.ParseDuration(req.Settings.Heartbeat)
 	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid defaultHeartbeatInterval: "+err.Error())
+		a.writeError(w, http.StatusBadRequest, "invalid heartbeat: "+err.Error())
 		return
 	}
-	if heartbeatInterval <= 0 {
-		a.writeError(w, http.StatusBadRequest, "defaultHeartbeatInterval must be greater than 0")
+	if heartbeat <= 0 {
+		a.writeError(w, http.StatusBadRequest, "heartbeat must be greater than 0")
 		return
 	}
 
-	// Handle telegram token - only allow setting it once
-	newToken := req.Settings.TelegramToken
-	if cfg.TelegramToken != "" && newToken != "" {
+	cfgRefresh, err := time.ParseDuration(req.Settings.ConfigRefresh)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid configRefresh: "+err.Error())
+		return
+	}
+	if cfgRefresh <= 0 {
+		a.writeError(w, http.StatusBadRequest, "configRefresh must be greater than 0")
+		return
+	}
+
+	// Handle token - only allow setting it once
+	newToken := req.Settings.Token
+	if cfg.Token != "" && newToken != "" {
 		// Token is already set and user is trying to change it - not allowed
-		a.writeError(w, http.StatusForbidden, "telegram token is already configured and cannot be changed via API")
+		a.writeError(w, http.StatusForbidden, "token is already configured and cannot be changed via API")
 		return
 	}
 
 	// If trying to set a token, validate that users are configured
-	if newToken != "" && len(req.Settings.AllowedTelegramUsers) == 0 {
-		a.writeError(w, http.StatusBadRequest, "allowedTelegramUsers must contain at least one user when telegramToken is set")
+	if newToken != "" && len(req.Settings.Users) == 0 {
+		a.writeError(w, http.StatusBadRequest, "users must contain at least one user when token is set")
 		return
 	}
 
 	// Update config (port remains unchanged - requires server restart)
-	cfg.SubnetBroadcast = req.Settings.SubnetBroadcast
-	cfg.ActiveTimeout = activeTimeout
-	cfg.DefaultHeartbeatInterval = heartbeatInterval
+	cfg.Network = req.Settings.Network
+	cfg.Timeout = timeout
+	cfg.Heartbeat = heartbeat
+	cfg.ConfigRefresh = cfgRefresh
 	if newToken != "" {
-		cfg.TelegramToken = newToken
+		cfg.Token = newToken
 	}
-	cfg.AllowedTelegramUsers = req.Settings.AllowedTelegramUsers
+	cfg.Users = req.Settings.Users
 
 	if err := a.cfgMgr.Update(cfg); err != nil {
 		a.logger.Error("update config", err)
@@ -425,16 +437,16 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Restart telegram service if token was just set
-	if newToken != "" && cfg.TelegramToken == newToken {
+	if newToken != "" && cfg.Token == newToken {
 		if a.telegramCancel != nil {
 			a.telegramCancel()
 		}
-		a.telegram = telegram.New(cfg.TelegramToken, cfg.AllowedTelegramUsers, a, a.logger)
+		a.telegram = telegram.New(cfg.Token, cfg.Users, a, a.logger)
 		a.telegramCtx, a.telegramCancel = context.WithCancel(context.Background())
 		if err := a.telegram.Start(a.telegramCtx); err != nil {
 			a.logger.Error("start telegram service", err)
 		}
-	} else if cfg.TelegramToken == "" {
+	} else if cfg.Token == "" {
 		// Token was cleared - stop telegram service
 		if a.telegramCancel != nil {
 			a.telegramCancel()
@@ -443,11 +455,12 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 
 	a.logger.Info("settings updated successfully")
 	response := settingsResponse{
-		SubnetBroadcast:          cfg.SubnetBroadcast,
-		ActiveTimeout:            cfg.ActiveTimeout.String(),
-		DefaultHeartbeatInterval: cfg.DefaultHeartbeatInterval.String(),
-		TelegramTokenSet:         cfg.TelegramToken != "",
-		AllowedTelegramUsers:     cfg.AllowedTelegramUsers,
+		Network:       cfg.Network,
+		Heartbeat:     cfg.Heartbeat.String(),
+		Timeout:       cfg.Timeout.String(),
+		ConfigRefresh: cfg.ConfigRefresh.String(),
+		TokenSet:      cfg.Token != "",
+		Users:         cfg.Users,
 	}
 	a.writeJSON(w, http.StatusOK, response)
 }
