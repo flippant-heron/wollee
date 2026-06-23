@@ -78,6 +78,13 @@ func (s *Service) handleMessage(message *tgbotapi.Message) {
 	if message.From == nil {
 		return
 	}
+
+	// Allow /whoami for anyone to discover their user ID
+	if strings.ToLower(message.Command()) == "whoami" {
+		s.reply(message.Chat.ID, fmt.Sprintf("Your Telegram user ID is: %d", message.From.ID))
+		return
+	}
+
 	if _, ok := s.allowed[message.From.ID]; !ok {
 		s.reply(message.Chat.ID, "unauthorized")
 		return
