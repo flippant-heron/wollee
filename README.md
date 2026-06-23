@@ -95,12 +95,15 @@ Agent:
    - Message [@BotFather](https://t.me/botfather) on Telegram
    - Send `/newbot` and follow the prompts
    - BotFather will provide you with a token (e.g., `123456789:ABCdefGHIjklmnoPQRstuvWXYZ1234567`)
-   - Store this token securely in your `config.yaml` as `server.telegramToken`
+   - Set the token in the server settings page, or manually store this token securely in your `config.yaml` as `server.telegramToken`
+   - Note that for security reasons, the server UI will only allow you to set the token when it is empty, and clearing it must be done by manually editing the config file.
+   - Note that an `unauthorized` message on Telegram means it is connected and working, but your user ID hasn't been added to the whitelist
 
 2. **Discover your Telegram user ID**:
-   - Message your bot and send `/whoami`
+   - When your server is running and connected to Telegram, message your bot and send `/whoami`
    - The bot will reply with your user ID (e.g., `Your Telegram user ID is: 123456789`)
-   - Add this ID to `server.allowedTelegramUsers` in your `config.yaml`
+   - Add the ID to the allowed user list in the settings, or to `server.allowedTelegramUsers` in your `config.yaml`
+   - Note that for the sake of simplicity, we haven't locked down the settings endpoint, so devices on your network can inject custom Telegram User Ids at will. You are responsible for the security of that endpoint.
 
 3. **Configuration example**:
 
