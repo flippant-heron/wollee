@@ -19,6 +19,8 @@
       <ul><li><strong>wollee</strong></li></ul>
       <ul>
         <li><button type="button" class="secondary" @click="load()" :aria-busy="loading">Refresh</button></li>
+        <li><button type="button" class="secondary" @click="reloadConfig()" :aria-busy="loading">Reload Config</button></li>
+        <li><a href="/settings" role="button" class="secondary">Settings</a></li>
         <li><a href="/add-host" role="button">Add Host</a></li>
       </ul>
     </nav>
@@ -120,6 +122,22 @@
               const payload = await response.json().catch(() => ({ error: 'delete request failed' }));
               throw new Error(payload.error || `delete request failed: ${response.status}`);
             }
+            await this.load();
+          } catch (error) {
+            this.error = error.message;
+          }
+        },
+        async reloadConfig() {
+          this.error = '';
+          try {
+            const response = await fetch('/config/reload', {
+              method: 'POST'
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({ error: 'reload failed' }));
+              throw new Error(payload.error || `reload failed: ${response.status}`);
+            }
+            // Reload the page data after config is reloaded
             await this.load();
           } catch (error) {
             this.error = error.message;

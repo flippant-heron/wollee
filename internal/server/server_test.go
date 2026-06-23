@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -21,12 +22,15 @@ func TestHandleRegisterReturnsHeartbeatInterval(t *testing.T) {
 		t.Fatalf("OpenRegistry() error = %v", err)
 	}
 
+	cfg := config.ServerConfig{
+		Port:                     8080,
+		SubnetBroadcast:          "192.168.1.255",
+		DefaultHeartbeatInterval: 20 * time.Second,
+	}
+	cfgMgr := config.NewManager("", cfg)
+
 	app := &App{
-		cfg: config.ServerConfig{
-			Port:                     8080,
-			SubnetBroadcast:          "192.168.1.255",
-			DefaultHeartbeatInterval: 20 * time.Second,
-		},
+		cfgMgr:   cfgMgr,
 		registry: registry,
 		logger:   appservice.NewLogger(true),
 	}
@@ -61,8 +65,11 @@ func TestTelegramListIncludesHosts(t *testing.T) {
 		t.Fatalf("Upsert() error = %v", err)
 	}
 
+	cfg := config.ServerConfig{DefaultHeartbeatInterval: 30 * time.Second}
+	cfgMgr := config.NewManager("", cfg)
+
 	app := &App{
-		cfg:      config.ServerConfig{DefaultHeartbeatInterval: 30 * time.Second},
+		cfgMgr:   cfgMgr,
 		registry: registry,
 		logger:   appservice.NewLogger(true),
 	}
@@ -70,5 +77,168 @@ func TestTelegramListIncludesHosts(t *testing.T) {
 	response := app.List()
 	if response == "No registered hosts." || !bytes.Contains([]byte(response), []byte("desk")) {
 		t.Fatalf("unexpected list response: %s", response)
+	}
+}
+
+func TestGetSettingsReturnsCurrentConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.ServerConfig{
+		Port:                     8080,
+		SubnetBroadcast:          "192.168.1.0/24",
+		DefaultHeartbeatInterval: 30 * time.Second,
+		ActiveTimeout:            5 * time.Minute,
+	}
+	cfgMgr := config.NewManager("", cfg)
+
+	app := &App{
+		cfgMgr:   cfgMgr,
+		registry: nil,
+		logger:   appservice.NewLogger(true),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	resp := httptest.NewRecorder()
+
+	app.getSettings(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusOK)
+	}
+
+	var payload settingsResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if payload.SubnetBroadcast != "192.168.1.0/24" {
+		t.Fatalf("SubnetBroadcast = %q, want 192.168.1.0/24", payload.SubnetBroadcast)
+	}
+	if payload.TelegramTokenSet {
+		t.Fatal("TelegramTokenSet = true, want false")
+	}
+}
+
+func TestUpdateSettingsPreventsTelegramTokenOverwrite(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+
+	// Write initial config with token
+	initialContent := []byte(`server:
+  port: 8080
+  subnetBroadcast: 192.168.1.0/24
+  defaultHeartbeatInterval: 30s
+  activeTimeout: 5m
+  telegramToken: existing-token
+  allowedTelegramUsers:
+    - 123
+hosts: []
+`)
+	if err := os.WriteFile(configPath, initialContent, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	cfgMgr := config.NewManager(configPath, cfg.Server)
+
+	registry, err := OpenRegistry(filepath.Join(dir, "hosts.yaml"))
+	if err != nil {
+		t.Fatalf("OpenRegistry() error = %v", err)
+	}
+
+	app := &App{
+		cfgMgr:   cfgMgr,
+		registry: registry,
+		logger:   appservice.NewLogger(true),
+	}
+
+	// Try to update token
+	updatePayload := serverSettingsRequest{
+		SubnetBroadcast:          "192.168.2.0/24",
+		DefaultHeartbeatInterval: "30s",
+		ActiveTimeout:            "5m",
+		TelegramToken:            "new-token",
+		AllowedTelegramUsers:     []int64{456},
+	}
+	body, _ := json.Marshal(settingsUpdateRequest{Settings: updatePayload})
+	req := httptest.NewRequest(http.MethodPost, "/api/settings", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+
+	app.updateSettings(resp, req)
+
+	// Should be forbidden
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusForbidden)
+	}
+
+	// Verify token didn't change
+	if mgr := cfgMgr.Get(); mgr.TelegramToken != "existing-token" {
+		t.Fatalf("token changed to %q, want existing-token", mgr.TelegramToken)
+	}
+}
+
+func TestUpdateSettingsAllowsTokenOnlyOnce(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+
+	// Write initial config without token
+	initialContent := []byte(`server:
+  port: 8080
+  subnetBroadcast: 192.168.1.0/24
+  defaultHeartbeatInterval: 30s
+  activeTimeout: 5m
+hosts: []
+`)
+	if err := os.WriteFile(configPath, initialContent, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	cfgMgr := config.NewManager(configPath, cfg.Server)
+
+	registry, err := OpenRegistry(filepath.Join(dir, "hosts.yaml"))
+	if err != nil {
+		t.Fatalf("OpenRegistry() error = %v", err)
+	}
+
+	app := &App{
+		cfgMgr:   cfgMgr,
+		registry: registry,
+		logger:   appservice.NewLogger(true),
+	}
+
+	// Set token for the first time
+	updatePayload := serverSettingsRequest{
+		SubnetBroadcast:          "192.168.1.0/24",
+		DefaultHeartbeatInterval: "30s",
+		ActiveTimeout:            "5m",
+		TelegramToken:            "new-token",
+		AllowedTelegramUsers:     []int64{123},
+	}
+	body, _ := json.Marshal(settingsUpdateRequest{Settings: updatePayload})
+	req := httptest.NewRequest(http.MethodPost, "/api/settings", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+
+	app.updateSettings(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("first token set status = %d, want %d", resp.Code, http.StatusOK)
+	}
+
+	// Verify token was set
+	if mgr := cfgMgr.Get(); mgr.TelegramToken != "new-token" {
+		t.Fatalf("token not set: %q", mgr.TelegramToken)
 	}
 }

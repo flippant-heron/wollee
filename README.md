@@ -16,21 +16,21 @@ wollee keeps power management simple: download the agent onto a downstream devic
 Server configuration is file-based (`config.yaml`) and includes static host metadata:
 
 ```yaml
+hosts:
+  - hostname: desktop
+    mac: 00:11:22:33:44:55
 server:
   port: 8080
   subnetBroadcast: 192.168.1.255
   defaultHeartbeatInterval: 30s
   activeTimeout: 5m
-  telegramToken: ""
-  allowedTelegramUsers: []
-
-hosts:
-  - hostname: desktop
-    mac: 00:11:22:33:44:55
-
+  telegramToken: ""                    # Optional: Telegram bot token from @BotFather
+  allowedTelegramUsers: []             # Optional: Telegram user IDs authorized to use bot commands
 ```
 
 `defaultHeartbeatInterval` is returned by `/register` and controls downstream heartbeat cadence.
+
+Config is reloaded by default every 300 seconds (5 minutes) and will restart the telegram agent if changes to telegram config are detected. If changes are made you can also manually refresh the config via the `/config/reload` api endpoint or from the UI.
 
 ## Design
 
@@ -87,12 +87,44 @@ Agent:
 ./wol-agent uninstall
 ```
 
-## Telegram commands
+## Telegram Integration
 
-If `server.telegramToken` is set and `allowedTelegramUsers` is non-empty:
+### Setting Up a Telegram Bot
 
-- `/list`
-- `/wake <hostname|mac>`
+1. **Create a bot with BotFather**:
+   - Message [@BotFather](https://t.me/botfather) on Telegram
+   - Send `/newbot` and follow the prompts
+   - BotFather will provide you with a token (e.g., `123456789:ABCdefGHIjklmnoPQRstuvWXYZ1234567`)
+   - Store this token securely in your `config.yaml` as `server.telegramToken`
+
+2. **Discover your Telegram user ID**:
+   - Message your bot and send `/whoami`
+   - The bot will reply with your user ID (e.g., `Your Telegram user ID is: 123456789`)
+   - Add this ID to `server.allowedTelegramUsers` in your `config.yaml`
+
+3. **Configuration example**:
+
+   ```yaml
+   server:
+     telegramToken: "123456789:ABCdefGHIjklmnoPQRstuvWXYZ1234567"
+     allowedTelegramUsers:
+       - 123456789    # Your Telegram user ID
+       - 987654321    # Another authorized user's ID (optional)
+   ```
+
+### Available Commands
+
+- `/whoami` — Returns your Telegram user ID (works for anyone, even unauthorized users)
+- `/list` — Lists all registered hosts and their status (online/offline) [authorized users only]
+- `/wake <hostname|mac>` — Sends a WoL packet to wake the specified host [authorized users only]
+  - Example: `/wake desktop` or `/wake 00:11:22:33:44:55`
+
+### Security Notes
+
+- **`allowedTelegramUsers`** is a whitelist that controls who can use the `/list` and `/wake` commands. Only Telegram user IDs in this list can execute these commands.
+- The `/whoami` command is always available to help users discover their ID
+- Keep your `telegramToken` private — anyone with this token can control your bot.
+- The token should be stored securely (e.g., environment variables, secrets management, or restricted file permissions).
 
 ## Development
 

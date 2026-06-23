@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flippant-heron/wollee/internal/telegram"
 	internalwol "github.com/flippant-heron/wollee/internal/wol"
 )
 
@@ -79,10 +81,11 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.logger.Info("registered host", "mac", host.MAC, "hostname", host.Hostname, "ip", host.IP)
+	cfg := a.cfgMgr.Get()
 	a.writeJSON(w, http.StatusOK, hostStatus{
 		HostRecord:        host,
 		Active:            true,
-		HeartbeatInterval: a.cfg.DefaultHeartbeatInterval.String(),
+		HeartbeatInterval: cfg.DefaultHeartbeatInterval.String(),
 	})
 }
 
@@ -108,14 +111,15 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := internalwol.SendMagicPacket(host.MAC, a.cfg.SubnetBroadcast); err != nil {
-		a.logger.Error("send magic packet", err, "mac", host.MAC, "hostname", host.Hostname, "broadcast", a.cfg.SubnetBroadcast)
+	cfg := a.cfgMgr.Get()
+	if err := internalwol.SendMagicPacket(host.MAC, cfg.SubnetBroadcast); err != nil {
+		a.logger.Error("send magic packet", err, "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.SubnetBroadcast)
 		a.writeError(w, http.StatusBadGateway, "failed to send magic packet")
 		return
 	}
 
-	a.logger.Info("sent magic packet", "mac", host.MAC, "hostname", host.Hostname, "broadcast", a.cfg.SubnetBroadcast)
-	a.writeJSON(w, http.StatusOK, hostStatus{HostRecord: host, Active: host.LastSeen.After(time.Now().Add(-a.cfg.ActiveTimeout))})
+	a.logger.Info("sent magic packet", "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.SubnetBroadcast)
+	a.writeJSON(w, http.StatusOK, hostStatus{HostRecord: host, Active: host.LastSeen.After(time.Now().Add(-cfg.ActiveTimeout))})
 }
 
 func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -124,9 +128,10 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cfg := a.cfgMgr.Get()
 	records := a.registry.List()
 	hosts := make([]hostStatus, 0, len(records))
-	cutoff := time.Now().Add(-a.cfg.ActiveTimeout)
+	cutoff := time.Now().Add(-cfg.ActiveTimeout)
 	for _, host := range records {
 		hosts = append(hosts, hostStatus{HostRecord: host, Active: host.LastSeen.After(cutoff)})
 	}
@@ -182,12 +187,13 @@ func (a *App) writeJSON(w http.ResponseWriter, status int, payload any) {
 }
 
 func (a *App) List() string {
+	cfg := a.cfgMgr.Get()
 	hosts := a.registry.List()
 	if len(hosts) == 0 {
 		return "No registered hosts."
 	}
 
-	cutoff := time.Now().Add(-a.cfg.ActiveTimeout)
+	cutoff := time.Now().Add(-cfg.ActiveTimeout)
 	var builder strings.Builder
 	builder.WriteString("Registered hosts:\n")
 	for _, host := range hosts {
@@ -208,7 +214,8 @@ func (a *App) Wake(target string) string {
 	if err != nil {
 		return err.Error()
 	}
-	if err := internalwol.SendMagicPacket(host.MAC, a.cfg.SubnetBroadcast); err != nil {
+	cfg := a.cfgMgr.Get()
+	if err := internalwol.SendMagicPacket(host.MAC, cfg.SubnetBroadcast); err != nil {
 		a.logger.Error("send magic packet from telegram", err, "mac", host.MAC, "hostname", host.Hostname)
 		return "Failed to send Wake-on-LAN packet."
 	}
@@ -256,10 +263,11 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.logger.Info("added host", "mac", host.MAC, "hostname", host.Hostname, "ip", host.IP)
+	cfg := a.cfgMgr.Get()
 	a.writeJSON(w, http.StatusOK, hostStatus{
 		HostRecord:        host,
 		Active:            true,
-		HeartbeatInterval: a.cfg.DefaultHeartbeatInterval.String(),
+		HeartbeatInterval: cfg.DefaultHeartbeatInterval.String(),
 	})
 }
 
@@ -296,4 +304,150 @@ func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
 
 	a.logger.Info("deleted host", "mac", normalized)
 	a.writeJSON(w, http.StatusOK, map[string]string{"message": "host deleted"})
+}
+
+func (a *App) handleConfigReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if err := a.reloadConfig(); err != nil {
+		a.logger.Error("reload config", err)
+		a.writeError(w, http.StatusInternalServerError, "failed to reload config: "+err.Error())
+		return
+	}
+
+	a.logger.Info("config reloaded successfully")
+	a.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":    "config reloaded successfully",
+		"lastReload": a.cfgMgr.LastReload(),
+	})
+}
+
+func (a *App) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if _, err := w.Write(a.settingsHTML); err != nil {
+		a.logger.Error("write settings response", err)
+	}
+}
+
+func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		a.getSettings(w, r)
+	case http.MethodPost:
+		a.updateSettings(w, r)
+	default:
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (a *App) getSettings(w http.ResponseWriter, r *http.Request) {
+	cfg := a.cfgMgr.Get()
+	response := settingsResponse{
+		SubnetBroadcast:          cfg.SubnetBroadcast,
+		ActiveTimeout:            cfg.ActiveTimeout.String(),
+		DefaultHeartbeatInterval: cfg.DefaultHeartbeatInterval.String(),
+		TelegramTokenSet:         cfg.TelegramToken != "",
+		AllowedTelegramUsers:     cfg.AllowedTelegramUsers,
+	}
+	a.writeJSON(w, http.StatusOK, response)
+}
+
+func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
+	var req settingsUpdateRequest
+	if err := a.decodeJSON(r, &req); err != nil {
+		a.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Validate and update settings
+	cfg := a.cfgMgr.Get()
+
+	if err := internalwol.ValidateBroadcast(req.Settings.SubnetBroadcast); err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid subnet broadcast: "+err.Error())
+		return
+	}
+
+	activeTimeout, err := time.ParseDuration(req.Settings.ActiveTimeout)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid activeTimeout: "+err.Error())
+		return
+	}
+	if activeTimeout <= 0 {
+		a.writeError(w, http.StatusBadRequest, "activeTimeout must be greater than 0")
+		return
+	}
+
+	heartbeatInterval, err := time.ParseDuration(req.Settings.DefaultHeartbeatInterval)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid defaultHeartbeatInterval: "+err.Error())
+		return
+	}
+	if heartbeatInterval <= 0 {
+		a.writeError(w, http.StatusBadRequest, "defaultHeartbeatInterval must be greater than 0")
+		return
+	}
+
+	// Handle telegram token - only allow setting it once
+	newToken := req.Settings.TelegramToken
+	if cfg.TelegramToken != "" && newToken != "" {
+		// Token is already set and user is trying to change it - not allowed
+		a.writeError(w, http.StatusForbidden, "telegram token is already configured and cannot be changed via API")
+		return
+	}
+
+	// If trying to set a token, validate that users are configured
+	if newToken != "" && len(req.Settings.AllowedTelegramUsers) == 0 {
+		a.writeError(w, http.StatusBadRequest, "allowedTelegramUsers must contain at least one user when telegramToken is set")
+		return
+	}
+
+	// Update config (port remains unchanged - requires server restart)
+	cfg.SubnetBroadcast = req.Settings.SubnetBroadcast
+	cfg.ActiveTimeout = activeTimeout
+	cfg.DefaultHeartbeatInterval = heartbeatInterval
+	if newToken != "" {
+		cfg.TelegramToken = newToken
+	}
+	cfg.AllowedTelegramUsers = req.Settings.AllowedTelegramUsers
+
+	if err := a.cfgMgr.Update(cfg); err != nil {
+		a.logger.Error("update config", err)
+		a.writeError(w, http.StatusInternalServerError, "failed to update config: "+err.Error())
+		return
+	}
+
+	// Restart telegram service if token was just set
+	if newToken != "" && cfg.TelegramToken == newToken {
+		if a.telegramCancel != nil {
+			a.telegramCancel()
+		}
+		a.telegram = telegram.New(cfg.TelegramToken, cfg.AllowedTelegramUsers, a, a.logger)
+		a.telegramCtx, a.telegramCancel = context.WithCancel(context.Background())
+		if err := a.telegram.Start(a.telegramCtx); err != nil {
+			a.logger.Error("start telegram service", err)
+		}
+	} else if cfg.TelegramToken == "" {
+		// Token was cleared - stop telegram service
+		if a.telegramCancel != nil {
+			a.telegramCancel()
+		}
+	}
+
+	a.logger.Info("settings updated successfully")
+	response := settingsResponse{
+		SubnetBroadcast:          cfg.SubnetBroadcast,
+		ActiveTimeout:            cfg.ActiveTimeout.String(),
+		DefaultHeartbeatInterval: cfg.DefaultHeartbeatInterval.String(),
+		TelegramTokenSet:         cfg.TelegramToken != "",
+		AllowedTelegramUsers:     cfg.AllowedTelegramUsers,
+	}
+	a.writeJSON(w, http.StatusOK, response)
 }

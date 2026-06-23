@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings - wollee</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <script defer src="/static/alpine.min.js"></script>
+  <style>
+    .settings-section { margin-bottom: 2rem; }
+    .settings-section h2 { font-size: 1.2rem; margin-bottom: 1rem; }
+    .field-group { margin-bottom: 1rem; }
+    .help-text { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
+    .user-list { background: #f5f5f5; padding: 1rem; border-radius: 0.5rem; margin-top: 0.5rem; }
+    .user-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; }
+    .user-item-id { font-family: monospace; }
+    .input-row { display: flex; gap: 0.5rem; align-items: flex-end; }
+    .input-row input { flex: 1; }
+    .button-group { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    .token-status { padding: 0.5rem; border-radius: 0.25rem; font-size: 0.9rem; margin: 0.5rem 0; }
+    .token-status.set { background: #e8f5e9; color: #2e7d32; }
+    .token-status.notset { background: #fff3e0; color: #e65100; }
+  </style>
+</head>
+<body>
+  <main class="container" x-data="settingsApp()" x-init="init()">
+    <nav>
+      <ul><li><strong>wollee</strong></li></ul>
+      <ul><li><a href="/">Back to Hosts</a></li></ul>
+    </nav>
+
+    <article>
+      <header>
+        <h1>Settings</h1>
+        <p>Configure server behavior and external integrations.</p>
+      </header>
+
+      <template x-if="error">
+        <p><mark x-text="error"></mark></p>
+      </template>
+
+      <template x-if="success">
+        <p style="color: green;" x-text="success"></p>
+      </template>
+
+      <!-- Server Settings Section -->
+      <div class="settings-section">
+        <h2>Server Settings</h2>
+
+        <div class="field-group">
+          <label for="subnetBroadcast">Subnet Broadcast Address (CIDR)</label>
+          <input id="subnetBroadcast" type="text" x-model="settings.subnetBroadcast" placeholder="e.g., 192.168.1.0/24">
+          <p class="help-text">Network in CIDR notation for sending Wake-on-LAN packets (e.g., 192.168.1.0/24 or 10.0.0.0/8)</p>
+        </div>
+
+        <div class="field-group">
+          <label for="activeTimeout">Active Timeout</label>
+          <input id="activeTimeout" type="text" x-model="settings.activeTimeout" placeholder="e.g., 5m">
+          <p class="help-text">Duration to consider a host active after last seen (e.g., 5m, 1h, 30s)</p>
+        </div>
+
+        <div class="field-group">
+          <label for="defaultHeartbeatInterval">Default Heartbeat Interval</label>
+          <input id="defaultHeartbeatInterval" type="text" x-model="settings.defaultHeartbeatInterval" placeholder="e.g., 30s">
+          <p class="help-text">Default interval for host heartbeats (e.g., 30s, 1m, 5m)</p>
+        </div>
+      </div>
+
+      <!-- Telegram Settings Section -->
+      <div class="settings-section">
+        <h2>Telegram Integration</h2>
+
+        <div class="field-group">
+          <label for="telegramToken">Telegram Bot Token</label>
+          <template x-if="settings.telegramTokenSet">
+            <div class="token-status set">✓ Token is configured</div>
+            <p class="help-text">Token is already configured. To change it, update the config.yaml file directly.</p>
+          </template>
+          <template x-if="!settings.telegramTokenSet">
+            <div class="token-status notset">✗ No token configured</div>
+            <input id="telegramToken" type="password" x-model="newTelegramToken" placeholder="Enter your Telegram bot token">
+            <p class="help-text">Your Telegram bot token from BotFather. This can only be set once.</p>
+          </template>
+        </div>
+
+        <div class="field-group">
+          <label>Allowed Telegram Users</label>
+          <p class="help-text">Only these users can control the bot</p>
+
+          <div class="input-row">
+            <input type="text" x-model="newUserId" placeholder="Enter user ID" @keydown.enter="addUser()">
+            <button type="button" @click="addUser()" :disabled="loading">Add User</button>
+          </div>
+
+          <template x-if="settings.allowedTelegramUsers.length > 0">
+            <div class="user-list">
+              <template x-for="(userId, index) in settings.allowedTelegramUsers" :key="index">
+                <div class="user-item">
+                  <span class="user-item-id" x-text="userId"></span>
+                  <button type="button" class="secondary" @click="removeUser(index)" :disabled="loading">Remove</button>
+                </div>
+              </template>
+            </div>
+          </template>
+          <template x-if="settings.allowedTelegramUsers.length === 0">
+            <p><em>No users configured</em></p>
+          </template>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="button-group">
+        <button type="button" @click="saveSettings()" :disabled="loading || !hasChanges">
+          <span x-show="!loading">Save Settings</span>
+          <span x-show="loading">Saving...</span>
+        </button>
+        <button type="button" class="secondary" @click="resetSettings()" :disabled="loading || !hasChanges">Reset Changes</button>
+      </div>
+    </article>
+  </main>
+
+  <script>
+    function settingsApp() {
+      return {
+        settings: {
+          subnetBroadcast: '',
+          activeTimeout: '5m',
+          defaultHeartbeatInterval: '30s',
+          telegramTokenSet: false,
+          allowedTelegramUsers: []
+        },
+        originalSettings: null,
+        newTelegramToken: '',
+        newUserId: '',
+        loading: false,
+        error: '',
+        success: '',
+
+        get hasChanges() {
+          // Check if any settings changed
+          // Token can only be changed if not already set
+          const currentSnapshot = {
+            subnetBroadcast: this.settings.subnetBroadcast,
+            activeTimeout: this.settings.activeTimeout,
+            defaultHeartbeatInterval: this.settings.defaultHeartbeatInterval,
+            allowedTelegramUsers: JSON.stringify(this.settings.allowedTelegramUsers),
+            newTelegramToken: this.settings.telegramTokenSet ? '' : this.newTelegramToken
+          };
+          const originalSnapshot = {
+            subnetBroadcast: this.originalSettings.subnetBroadcast,
+            activeTimeout: this.originalSettings.activeTimeout,
+            defaultHeartbeatInterval: this.originalSettings.defaultHeartbeatInterval,
+            allowedTelegramUsers: JSON.stringify(this.originalSettings.allowedTelegramUsers),
+            newTelegramToken: ''
+          };
+          return JSON.stringify(currentSnapshot) !== JSON.stringify(originalSnapshot);
+        },
+
+        async init() {
+          await this.loadSettings();
+        },
+
+        async loadSettings() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const response = await fetch('/api/settings');
+            if (!response.ok) {
+              throw new Error(`Failed to load settings: ${response.status}`);
+            }
+            const data = await response.json();
+            this.settings = {
+              subnetBroadcast: data.subnetBroadcast || '',
+              activeTimeout: data.activeTimeout || '5m',
+              defaultHeartbeatInterval: data.defaultHeartbeatInterval || '30s',
+              telegramTokenSet: data.telegramTokenSet || false,
+              allowedTelegramUsers: data.allowedTelegramUsers || []
+            };
+            this.originalSettings = JSON.parse(JSON.stringify(this.settings));
+            this.newTelegramToken = '';
+          } catch (error) {
+            this.error = error.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async saveSettings() {
+          this.loading = true;
+          this.error = '';
+          this.success = '';
+          try {
+            const payload = {
+              settings: {
+                subnetBroadcast: this.settings.subnetBroadcast,
+                activeTimeout: this.settings.activeTimeout,
+                defaultHeartbeatInterval: this.settings.defaultHeartbeatInterval,
+                telegramToken: this.settings.telegramTokenSet ? '' : this.newTelegramToken,
+                allowedTelegramUsers: this.settings.allowedTelegramUsers
+              }
+            };
+            const response = await fetch('/api/settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({ error: 'Failed to save settings' }));
+              throw new Error(payload.error || `Failed to save settings: ${response.status}`);
+            }
+            this.success = 'Settings saved successfully';
+            this.newTelegramToken = '';
+            await this.loadSettings();
+            setTimeout(() => {
+              this.success = '';
+            }, 3000);
+          } catch (error) {
+            this.error = error.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        resetSettings() {
+          this.settings = JSON.parse(JSON.stringify(this.originalSettings));
+          this.newTelegramToken = '';
+          this.error = '';
+          this.success = '';
+        },
+
+        addUser() {
+          const userId = parseInt(this.newUserId.trim(), 10);
+          if (isNaN(userId) || userId <= 0) {
+            this.error = 'Please enter a valid user ID';
+            return;
+          }
+          if (this.settings.allowedTelegramUsers.includes(userId)) {
+            this.error = 'This user ID is already in the list';
+            return;
+          }
+          this.settings.allowedTelegramUsers.push(userId);
+          this.newUserId = '';
+          this.error = '';
+        },
+
+        removeUser(index) {
+          this.settings.allowedTelegramUsers.splice(index, 1);
+        }
+      };
+    }
+  </script>
+</body>
+</html>

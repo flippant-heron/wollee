@@ -10,6 +10,12 @@ tasks:
     cmds:
       - go test ./...
 
+  coverage:
+    desc: Run unit tests with coverage report
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out
+
   lint:
     desc: Run lint checks
     cmds:
