@@ -6,6 +6,7 @@
   <title>Settings - wollee</title>
   <link rel="stylesheet" href="/static/pico.min.css">
   <script defer src="/static/alpine.min.js"></script>
+  <script src="/static/common.js"></script>
   <style>
     .settings-section { margin-bottom: 2rem; }
     .settings-section h2 { font-size: 1.2rem; margin-bottom: 1rem; }
@@ -23,10 +24,15 @@
   </style>
 </head>
 <body>
-  <main class="container" x-data="settingsApp()" x-init="init()">
+  <main class="container" x-data="settingsApp()" x-init="$store.theme.init(); init()">
     <nav>
       <ul><li><strong>wollee</strong></li></ul>
-      <ul><li><a href="/">Back to Hosts</a></li></ul>
+      <ul>
+        <li><a href="/">Back to Hosts</a></li>
+        <li><button type="button" class="secondary" @click="$store.theme.toggle()" title="Toggle dark mode">
+          <span x-text="$store.theme.dark ? '&#9790;' : '&#9788;'"></span>
+        </button></li>
+      </ul>
     </nav>
 
     <article>

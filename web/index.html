@@ -6,6 +6,7 @@
   <title>wollee</title>
   <link rel="stylesheet" href="/static/pico.min.css">
   <script defer src="/static/alpine.min.js"></script>
+  <script src="/static/common.js"></script>
   <style>
     .status-dot { display: inline-block; width: .75rem; height: .75rem; border-radius: 999px; margin-right: .5rem; }
     .status-online { background: #2fb344; }
@@ -14,7 +15,7 @@
   </style>
 </head>
 <body>
-  <main class="container" x-data="wolleeApp()" x-init="load()">
+  <main class="container" x-data="wolleeApp()" x-init="$store.theme.init(); load()">
     <nav>
       <ul><li><strong>wollee</strong></li></ul>
       <ul>
@@ -22,6 +23,9 @@
         <li><button type="button" class="secondary" @click="reloadConfig()" :aria-busy="loading">Reload Config</button></li>
         <li><a href="/settings" role="button" class="secondary">Settings</a></li>
         <li><a href="/add-host" role="button">Add Host</a></li>
+        <li><button type="button" class="secondary" @click="$store.theme.toggle()" title="Toggle dark mode">
+          <span x-text="$store.theme.dark ? '&#9790;' : '&#9788;'"></span>
+        </button></li>
       </ul>
     </nav>
 
