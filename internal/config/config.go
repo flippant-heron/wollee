@@ -27,6 +27,7 @@ type ServerConfig struct {
 	ConfigRefresh time.Duration
 	Token         string
 	Users         []int64
+	Whoami        bool
 }
 
 type HostConfig struct {
@@ -47,6 +48,7 @@ type rawServerConfig struct {
 	ConfigRefresh string  `mapstructure:"configRefresh"`
 	Token         string  `mapstructure:"token"`
 	Users         []int64 `mapstructure:"users"`
+	Whoami        bool    `mapstructure:"whoami"`
 }
 
 func DefaultPath() string {
@@ -65,6 +67,7 @@ func Load(path string) (Config, error) {
 	v.SetDefault("server.heartbeat", "30s")
 	v.SetDefault("server.timeout", "5m")
 	v.SetDefault("server.configRefresh", "5m")
+	v.SetDefault("server.whoami", false)
 
 	if err := v.ReadInConfig(); err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
@@ -100,6 +103,7 @@ func Load(path string) (Config, error) {
 			ConfigRefresh: cfgRefresh,
 			Token:         raw.Server.Token,
 			Users:         raw.Server.Users,
+			Whoami:        raw.Server.Whoami,
 		},
 		Hosts: raw.Hosts,
 	}, nil
@@ -126,10 +130,6 @@ func (c *Config) ValidateServer() error {
 
 	if c.Server.ConfigRefresh <= 0 {
 		errs = append(errs, errors.New("server.configRefresh must be greater than 0"))
-	}
-
-	if c.Server.Token != "" && len(c.Server.Users) == 0 {
-		errs = append(errs, errors.New("server.users must contain at least one user when token is set"))
 	}
 
 	for _, userID := range c.Server.Users {

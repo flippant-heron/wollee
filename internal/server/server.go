@@ -57,6 +57,7 @@ type serverSettingsRequest struct {
 	ConfigRefresh string  `json:"configRefresh"`
 	Token         string  `json:"token"`
 	Users         []int64 `json:"users"`
+	Whoami        bool    `json:"whoami"`
 }
 
 type settingsUpdateRequest struct {
@@ -70,6 +71,7 @@ type settingsResponse struct {
 	ConfigRefresh string  `json:"configRefresh"`
 	TokenSet      bool    `json:"tokenSet"`
 	Users         []int64 `json:"users"`
+	Whoami        bool    `json:"whoami"`
 }
 
 func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) (*App, error) {
@@ -117,7 +119,7 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 		settingsHTML: settingsHTML,
 	}
 
-	app.telegram = telegram.New(cfg.Token, cfg.Users, app, logger)
+	app.telegram = telegram.New(cfg.Token, cfg.Users, app, logger, cfg.Whoami)
 	return app, nil
 }
 
@@ -173,13 +175,14 @@ func (a *App) reloadConfig() error {
 
 	// If telegram settings changed, restart the telegram service
 	if oldCfg.Token != newCfg.Token ||
-		!eqInt64Slices(oldCfg.Users, newCfg.Users) {
+		!eqInt64Slices(oldCfg.Users, newCfg.Users) ||
+		oldCfg.Whoami != newCfg.Whoami {
 		// Stop the old telegram service
 		a.telegramCancel()
 		a.telegram.Shutdown()
 
 		// Create a new telegram service with updated config
-		a.telegram = telegram.New(newCfg.Token, newCfg.Users, a, a.logger)
+		a.telegram = telegram.New(newCfg.Token, newCfg.Users, a, a.logger, newCfg.Whoami)
 
 		// Create a new context for the telegram service (child of the main context through Run())
 		// We create a new child context since the old one was cancelled

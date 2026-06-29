@@ -15,3 +15,6 @@ server:
   users: []
     # - 123456789     # Your Telegram user ID
     # - 987654321     # Another authorized user (optional)
+  # Optional: Allow unauthenticated /whoami command (default: true)
+  # Set to false after configuring users to require authentication for /whoami
+  whoami: true

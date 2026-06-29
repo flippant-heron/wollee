@@ -87,6 +87,7 @@ func (m *Manager) Update(newConfig ServerConfig) error {
 		"configRefresh": newConfig.ConfigRefresh.String(),
 		"token":         newConfig.Token,
 		"users":         newConfig.Users,
+		"whoami":        newConfig.Whoami,
 	}
 	config["server"] = serverConfig
 

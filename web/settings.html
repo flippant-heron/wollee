@@ -83,6 +83,14 @@
         <h2>Telegram Integration</h2>
 
         <div class="field-group">
+          <label>
+            <input id="whoami" type="checkbox" x-model="settings.whoami">
+            Allow unauthenticated /whoami command
+          </label>
+          <p class="help-text">If enabled, anyone can use /whoami to discover their user ID. Disable this after creating your bot and setting up authorized users.</p>
+        </div>
+
+        <div class="field-group">
           <label for="token">Telegram Bot Token</label>
           <template x-if="settings.tokenSet">
             <div class="token-status set">✓ Token is configured</div>
@@ -104,16 +112,22 @@
             <button type="button" @click="addUser()" :disabled="loading">Add User</button>
           </div>
 
-          <template x-if="settings.users.length > 0">
-            <div class="user-list">
-              <template x-for="(userId, index) in settings.users" :key="index">
-                <div class="user-item">
-                  <span class="user-item-id" x-text="userId"></span>
-                  <button type="button" class="secondary" @click="removeUser(index)" :disabled="loading">Remove</button>
+          <div x-show="settings.users.length > 0" class="user-list">
+            <template x-for="(userId, index) in settings.users" :key="index">
+              <div class="user-item" style="gap: 1rem;">
+                <div x-show="editingIndex !== index" style="display: flex; flex: 1; gap: 0.5rem; align-items: center;">
+                  <span class="user-item-id" x-text="userId" style="flex: 1;"></span>
+                  <button type="button" class="secondary" @click="startEdit(index, userId)" :disabled="loading" style="flex: 0 0 auto;">Edit</button>
+                  <button type="button" class="secondary" @click="removeUser(index)" :disabled="loading" style="flex: 0 0 auto;">Remove</button>
                 </div>
-              </template>
-            </div>
-          </template>
+                <div x-show="editingIndex === index" style="display: flex; flex: 1; gap: 0.5rem; align-items: center;">
+                  <input type="text" x-model="editingValue" placeholder="Enter user ID" style="flex: 1;">
+                  <button type="button" @click="saveEdit(index)" :disabled="loading" style="flex: 0 0 auto;">Save</button>
+                  <button type="button" class="secondary" @click="cancelEdit()" :disabled="loading" style="flex: 0 0 auto;">Cancel</button>
+                </div>
+              </div>
+            </template>
+          </div>
           <template x-if="settings.users.length === 0">
             <p><em>No users configured</em></p>
           </template>
@@ -140,11 +154,14 @@
           heartbeat: '30s',
           configRefresh: '5m',
           tokenSet: false,
-          users: []
+          users: [],
+          whoami: true
         },
         originalSettings: null,
         newToken: '',
         newUserId: '',
+        editingIndex: -1,
+        editingValue: '',
         loading: false,
         error: '',
         success: '',
@@ -158,7 +175,8 @@
             heartbeat: this.settings.heartbeat,
             configRefresh: this.settings.configRefresh,
             users: JSON.stringify(this.settings.users),
-            newToken: this.settings.tokenSet ? '' : this.newToken
+            newToken: this.settings.tokenSet ? '' : this.newToken,
+            whoami: this.settings.whoami
           };
           const originalSnapshot = {
             network: this.originalSettings.network,
@@ -166,13 +184,18 @@
             heartbeat: this.originalSettings.heartbeat,
             configRefresh: this.originalSettings.configRefresh,
             users: JSON.stringify(this.originalSettings.users),
-            newToken: ''
+            newToken: '',
+            whoami: this.originalSettings.whoami
           };
           return JSON.stringify(currentSnapshot) !== JSON.stringify(originalSnapshot);
         },
 
         async init() {
+          console.log('Settings page initializing...');
           await this.loadSettings();
+          if (!this.error) {
+            console.log('Settings loaded successfully:', this.settings);
+          }
         },
 
         async loadSettings() {
@@ -181,21 +204,32 @@
           try {
             const response = await fetch('/api/settings');
             if (!response.ok) {
-              throw new Error(`Failed to load settings: ${response.status}`);
+              throw new Error(`Failed to load settings (HTTP ${response.status})`);
             }
             const data = await response.json();
+            
+            // Validate that we received the expected fields
+            if (typeof data.network !== 'string' || typeof data.heartbeat !== 'string' || 
+                typeof data.timeout !== 'string' || typeof data.configRefresh !== 'string') {
+              throw new Error('Invalid settings response from server - malformed data');
+            }
+            
             this.settings = {
               network: data.network || '',
               timeout: data.timeout || '5m',
               heartbeat: data.heartbeat || '30s',
               configRefresh: data.configRefresh || '5m',
               tokenSet: data.tokenSet || false,
-              users: data.users || []
+              users: Array.isArray(data.users) ? data.users : [],
+              whoami: data.whoami !== undefined ? data.whoami : true
             };
             this.originalSettings = JSON.parse(JSON.stringify(this.settings));
             this.newToken = '';
+            this.editingIndex = -1;
+            this.editingValue = '';
           } catch (error) {
-            this.error = error.message;
+            this.error = `Failed to load settings: ${error.message}`;
+            console.error('Settings load error:', error);
           } finally {
             this.loading = false;
           }
@@ -213,7 +247,8 @@
                 heartbeat: this.settings.heartbeat,
                 configRefresh: this.settings.configRefresh,
                 token: this.settings.tokenSet ? '' : this.newToken,
-                users: this.settings.users
+                users: this.settings.users,
+                whoami: this.settings.whoami
               }
             };
             const response = await fetch('/api/settings', {
@@ -222,17 +257,36 @@
               body: JSON.stringify(payload)
             });
             if (!response.ok) {
-              const payload = await response.json().catch(() => ({ error: 'Failed to save settings' }));
-              throw new Error(payload.error || `Failed to save settings: ${response.status}`);
+              const errorData = await response.json().catch(() => ({ error: 'Failed to save settings' }));
+              throw new Error(errorData.error || `Failed to save settings: ${response.status}`);
             }
-            this.success = 'Settings saved successfully';
+            
+            // Parse response to verify what was actually saved
+            const savedData = await response.json();
+            this.success = `Settings saved successfully! Changes applied immediately.`;
             this.newToken = '';
-            await this.loadSettings();
+            
+            // Update local settings from the verified response
+            this.settings = {
+              network: savedData.network || '',
+              timeout: savedData.timeout || '5m',
+              heartbeat: savedData.heartbeat || '30s',
+              configRefresh: savedData.configRefresh || '5m',
+              tokenSet: savedData.tokenSet || false,
+              users: savedData.users || [],
+              whoami: savedData.whoami !== undefined ? savedData.whoami : true
+            };
+            this.originalSettings = JSON.parse(JSON.stringify(this.settings));
+            
+            // Auto-clear success message after 5 seconds
             setTimeout(() => {
-              this.success = '';
-            }, 3000);
+              if (this.success) {
+                this.success = '';
+              }
+            }, 5000);
           } catch (error) {
-            this.error = error.message;
+            this.error = `Error saving settings: ${error.message}. Please check your input and try again.`;
+            console.error('Settings save error:', error);
           } finally {
             this.loading = false;
           }
@@ -241,8 +295,39 @@
         resetSettings() {
           this.settings = JSON.parse(JSON.stringify(this.originalSettings));
           this.newToken = '';
+          this.editingIndex = -1;
+          this.editingValue = '';
           this.error = '';
           this.success = '';
+          console.log('Settings reset to original values');
+        },
+
+        startEdit(index, userId) {
+          this.editingIndex = index;
+          this.editingValue = String(userId);
+        },
+
+        cancelEdit() {
+          this.editingIndex = -1;
+          this.editingValue = '';
+          this.error = '';
+        },
+
+        saveEdit(index) {
+          const newUserId = parseInt(this.editingValue.trim(), 10);
+          if (isNaN(newUserId) || newUserId <= 0) {
+            this.error = 'Please enter a valid user ID';
+            return;
+          }
+          const existingIndex = this.settings.users.indexOf(newUserId);
+          if (existingIndex !== -1 && existingIndex !== index) {
+            this.error = 'This user ID is already in the list';
+            return;
+          }
+          this.settings.users[index] = newUserId;
+          this.editingIndex = -1;
+          this.editingValue = '';
+          this.error = '';
         },
 
         addUser() {
@@ -258,10 +343,13 @@
           this.settings.users.push(userId);
           this.newUserId = '';
           this.error = '';
+          console.log('User added:', userId, 'Total users:', this.settings.users);
         },
 
         removeUser(index) {
+          const removedUser = this.settings.users[index];
           this.settings.users.splice(index, 1);
+          console.log('User removed:', removedUser, 'Total users:', this.settings.users);
         }
       };
     }

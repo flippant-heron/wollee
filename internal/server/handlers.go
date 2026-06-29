@@ -357,6 +357,7 @@ func (a *App) getSettings(w http.ResponseWriter, r *http.Request) {
 		ConfigRefresh: cfg.ConfigRefresh.String(),
 		TokenSet:      cfg.Token != "",
 		Users:         cfg.Users,
+		Whoami:        cfg.Whoami,
 	}
 	a.writeJSON(w, http.StatusOK, response)
 }
@@ -370,6 +371,12 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Validate and update settings
 	cfg := a.cfgMgr.Get()
+
+	// Save original config values before modification
+	oldToken := cfg.Token
+	oldUsers := make([]int64, len(cfg.Users))
+	copy(oldUsers, cfg.Users)
+	oldWhoami := cfg.Whoami
 
 	if err := internalwol.ValidateBroadcast(req.Settings.Network); err != nil {
 		a.writeError(w, http.StatusBadRequest, "invalid network: "+err.Error())
@@ -414,17 +421,12 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If trying to set a token, validate that users are configured
-	if newToken != "" && len(req.Settings.Users) == 0 {
-		a.writeError(w, http.StatusBadRequest, "users must contain at least one user when token is set")
-		return
-	}
-
 	// Update config (port remains unchanged - requires server restart)
 	cfg.Network = req.Settings.Network
 	cfg.Timeout = timeout
 	cfg.Heartbeat = heartbeat
 	cfg.ConfigRefresh = cfgRefresh
+	cfg.Whoami = req.Settings.Whoami
 	if newToken != "" {
 		cfg.Token = newToken
 	}
@@ -436,31 +438,67 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Restart telegram service if token was just set
-	if newToken != "" && cfg.Token == newToken {
-		if a.telegramCancel != nil {
-			a.telegramCancel()
-		}
-		a.telegram = telegram.New(cfg.Token, cfg.Users, a, a.logger)
-		a.telegramCtx, a.telegramCancel = context.WithCancel(context.Background())
-		if err := a.telegram.Start(a.telegramCtx); err != nil {
-			a.logger.Error("start telegram service", err)
-		}
-	} else if cfg.Token == "" {
-		// Token was cleared - stop telegram service
-		if a.telegramCancel != nil {
-			a.telegramCancel()
+	// Immediately reload config from disk to verify persistence and ensure consistency
+	if err := a.cfgMgr.Reload(); err != nil {
+		a.logger.Error("reload config after update", err)
+		a.writeError(w, http.StatusInternalServerError, "settings saved but verification failed: "+err.Error())
+		return
+	}
+
+	// Get the freshly loaded config to verify all changes were persisted
+	verifiedCfg := a.cfgMgr.Get()
+
+	// Restart telegram service if any relevant settings changed
+	usersChanged := !eqInt64Slices(oldUsers, verifiedCfg.Users)
+	tokenChanged := oldToken != verifiedCfg.Token
+	whoamiChanged := oldWhoami != verifiedCfg.Whoami
+
+	if tokenChanged || usersChanged || whoamiChanged {
+		if verifiedCfg.Token != "" {
+			// Token is set - restart with new config
+			if a.telegramCancel != nil {
+				a.telegramCancel()
+			}
+			if a.telegram != nil {
+				a.telegram.Shutdown()
+			}
+			a.telegram = telegram.New(verifiedCfg.Token, verifiedCfg.Users, a, a.logger, verifiedCfg.Whoami)
+			a.telegramCtx, a.telegramCancel = context.WithCancel(context.Background())
+			if err := a.telegram.Start(a.telegramCtx); err != nil {
+				a.logger.Error("start telegram service after settings change", err)
+			}
+		} else {
+			// Token was cleared - stop telegram service
+			if a.telegramCancel != nil {
+				a.telegramCancel()
+			}
+			if a.telegram != nil {
+				a.telegram.Shutdown()
+			}
 		}
 	}
 
-	a.logger.Info("settings updated successfully")
+	a.logger.Info("settings updated and verified successfully",
+		"tokenChanged", tokenChanged,
+		"usersChanged", usersChanged,
+		"whoamiChanged", whoamiChanged,
+		"network", verifiedCfg.Network,
+		"heartbeat", verifiedCfg.Heartbeat,
+		"timeout", verifiedCfg.Timeout,
+		"configRefresh", verifiedCfg.ConfigRefresh,
+		"whoami", verifiedCfg.Whoami,
+		"usersCount", len(verifiedCfg.Users),
+		"tokenSet", verifiedCfg.Token != "",
+	)
+
 	response := settingsResponse{
-		Network:       cfg.Network,
-		Heartbeat:     cfg.Heartbeat.String(),
-		Timeout:       cfg.Timeout.String(),
-		ConfigRefresh: cfg.ConfigRefresh.String(),
-		TokenSet:      cfg.Token != "",
-		Users:         cfg.Users,
+		Network:       verifiedCfg.Network,
+		Heartbeat:     verifiedCfg.Heartbeat.String(),
+		Timeout:       verifiedCfg.Timeout.String(),
+		ConfigRefresh: verifiedCfg.ConfigRefresh.String(),
+		TokenSet:      verifiedCfg.Token != "",
+		Users:         verifiedCfg.Users,
+		Whoami:        verifiedCfg.Whoami,
 	}
 	a.writeJSON(w, http.StatusOK, response)
 }
