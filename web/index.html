@@ -12,6 +12,12 @@
     .status-online { background: #2fb344; }
     .status-offline { background: #d63939; }
     code { white-space: nowrap; }
+    dialog { padding: 0; }
+    dialog article { margin: 0; }
+    dialog header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 0; }
+    dialog header h3 { margin: 0; }
+    dialog header button { padding: 0; min-height: auto; }
+    dialog footer { display: flex; gap: 0.5rem; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -108,14 +114,22 @@
               const payload = await response.json().catch(() => ({ error: 'wake request failed' }));
               throw new Error(payload.error || `wake request failed: ${response.status}`);
             }
+            // Find the hostname for the toast message
+            const host = this.hosts.find(h => h.mac === mac);
+            const hostname = host?.hostname || mac;
+            showToast(`WOL packet sent to ${hostname}`, 3000, 'success');
             await this.load();
           } catch (error) {
             this.error = error.message;
+            showToast(`Failed to send WOL: ${error.message}`, 4000, 'error');
           }
         },
         async deleteHost(mac) {
           this.error = '';
-          if (!confirm(`Delete host ${mac}?`)) {
+          const host = this.hosts.find(h => h.mac === mac);
+          const hostname = host?.hostname || mac;
+          const confirmed = await confirmModal('Delete Host', `Are you sure you want to delete ${hostname}?`);
+          if (!confirmed) {
             return;
           }
           try {
@@ -126,9 +140,11 @@
               const payload = await response.json().catch(() => ({ error: 'delete request failed' }));
               throw new Error(payload.error || `delete request failed: ${response.status}`);
             }
+            showToast(`${hostname} deleted successfully`, 2000, 'success');
             await this.load();
           } catch (error) {
             this.error = error.message;
+            showToast(`Failed to delete: ${error.message}`, 4000, 'error');
           }
         },
         async reloadConfig() {
@@ -141,10 +157,12 @@
               const payload = await response.json().catch(() => ({ error: 'reload failed' }));
               throw new Error(payload.error || `reload failed: ${response.status}`);
             }
+            showToast('Configuration reloaded successfully', 2000, 'success');
             // Reload the page data after config is reloaded
             await this.load();
           } catch (error) {
             this.error = error.message;
+            showToast(`Reload failed: ${error.message}`, 4000, 'error');
           }
         }
       };

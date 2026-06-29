@@ -21,6 +21,12 @@
     .token-status { padding: 0.5rem; border-radius: 0.25rem; font-size: 0.9rem; margin: 0.5rem 0; }
     .token-status.set { background: #e8f5e9; color: #2e7d32; }
     .token-status.notset { background: #fff3e0; color: #e65100; }
+    dialog { padding: 0; }
+    dialog article { margin: 0; }
+    dialog header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 0; }
+    dialog header h3 { margin: 0; }
+    dialog header button { padding: 0; min-height: auto; }
+    dialog footer { display: flex; gap: 0.5rem; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -348,8 +354,12 @@
 
         removeUser(index) {
           const removedUser = this.settings.users[index];
-          this.settings.users.splice(index, 1);
-          console.log('User removed:', removedUser, 'Total users:', this.settings.users);
+          confirmModal('Remove User', `Are you sure you want to remove user ${removedUser} from authorized users?`).then((confirmed) => {
+            if (confirmed) {
+              this.settings.users.splice(index, 1);
+              console.log('User removed:', removedUser, 'Total users:', this.settings.users);
+            }
+          });
         }
       };
     }

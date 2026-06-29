@@ -72,7 +72,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		MAC:      mac,
 		Hostname: strings.TrimSpace(req.Hostname),
 		IP:       ip.String(),
-		LastSeen: time.Now().UTC(),
+		LastSeen: time.Unix(0, 0),
 	}
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("persist host registration", err, "mac", mac)
@@ -84,7 +84,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	cfg := a.cfgMgr.Get()
 	a.writeJSON(w, http.StatusOK, hostStatus{
 		HostRecord:        host,
-		Active:            true,
+		Active:            false,
 		HeartbeatInterval: cfg.Heartbeat.String(),
 	})
 }
@@ -254,7 +254,7 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 		MAC:      mac,
 		Hostname: strings.TrimSpace(req.Hostname),
 		IP:       ip.String(),
-		LastSeen: time.Now().UTC(),
+		LastSeen: time.Unix(0, 0),
 	}
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("persist host addition", err, "mac", mac)
@@ -266,7 +266,7 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 	cfg := a.cfgMgr.Get()
 	a.writeJSON(w, http.StatusOK, hostStatus{
 		HostRecord:        host,
-		Active:            true,
+		Active:            false,
 		HeartbeatInterval: cfg.Heartbeat.String(),
 	})
 }
