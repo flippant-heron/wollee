@@ -8,10 +8,14 @@
   <script defer src="/static/alpine.min.js"></script>
   <script src="/static/common.js"></script>
   <style>
+    main.container { padding: 1rem; }
+    nav li { display: flex; align-items: center; }
+    nav button, nav a[role="button"] { padding: 0.5rem 0.75rem; min-height: auto; }
     .status-dot { display: inline-block; width: .75rem; height: .75rem; border-radius: 999px; margin-right: .5rem; }
     .status-online { background: #2fb344; }
     .status-offline { background: #d63939; }
     code { white-space: nowrap; }
+    table td, table th { padding: 0.5rem; }
     dialog { padding: 0; }
     dialog article { margin: 0; }
     dialog header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 0; }
@@ -29,7 +33,7 @@
         <li><button type="button" class="secondary" @click="reloadConfig()" :aria-busy="loading">Reload Config</button></li>
         <li><a href="/settings" role="button" class="secondary">Settings</a></li>
         <li><a href="/add-host" role="button">Add Host</a></li>
-        <li><button type="button" class="secondary" @click="$store.theme.toggle()" title="Toggle dark mode">
+        <li><button type="button" class="secondary" @click="$store.theme.toggle()" title="Toggle dark mode" aria-label="Toggle dark mode">
           <span x-text="$store.theme.dark ? '&#9790;' : '&#9788;'"></span>
         </button></li>
       </ul>

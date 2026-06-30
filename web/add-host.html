@@ -9,12 +9,17 @@
   <script src="/static/common.js"></script>
 </head>
 <body>
+  <style>
+    main.container { padding: 1rem; }
+    nav li { display: flex; align-items: center; }
+    nav button, nav a[role="button"] { padding: 0.5rem 0.75rem; min-height: auto; }
+  </style>
   <main class="container" x-data="addHostApp()" x-init="$store.theme.init(); init()">
     <nav>
       <ul><li><strong>wollee</strong></li></ul>
       <ul>
         <li><a href="/">Back to Hosts</a></li>
-        <li><button type="button" class="secondary" @click="$store.theme.toggle()" title="Toggle dark mode">
+        <li><button type="button" class="secondary" @click="$store.theme.toggle()" title="Toggle dark mode" aria-label="Toggle dark mode">
           <span x-text="$store.theme.dark ? '&#9790;' : '&#9788;'"></span>
         </button></li>
       </ul>
