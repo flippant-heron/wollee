@@ -105,6 +105,7 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 	requiredAssets := []string{
 		"alpine.min.js",
 		"blades.min.css",
+		"app.css",
 		"material-symbols.css",
 		"material-symbols-outlined.woff2",
 	}

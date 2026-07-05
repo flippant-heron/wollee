@@ -14,6 +14,8 @@ func (a *App) newRouter() http.Handler {
 	mux.HandleFunc("/config/reload", a.handleConfigReload)
 	mux.HandleFunc("/hosts", a.handleAddHost)
 	mux.HandleFunc("DELETE /hosts/{mac}", a.handleDeleteHost)
+	mux.HandleFunc("PATCH /hosts/{mac}/disable", a.handleDisableHost)
+	mux.HandleFunc("PATCH /hosts/{mac}/enable", a.handleEnableHost)
 	mux.HandleFunc("/api/settings", a.handleSettings)
 	return mux
 }

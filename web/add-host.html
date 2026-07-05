@@ -5,50 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Add Host - wollee</title>
   <link rel="stylesheet" href="/static/blades.min.css">
+  <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/material-symbols.css">
   <script defer src="/static/alpine.min.js"></script>
   <script src="/static/common.js"></script>
 </head>
 <body>
-  <style>
-    /* Layout & spacing */
-    main.container { padding: 1rem; }
-    nav { margin: 0.5rem 0; display: flex; align-items: center; gap: 1rem; }
-    nav ul { margin: 0; display: flex; align-items: center; gap: 0.5rem; }
-    nav li { display: flex; align-items: center; }
-    nav li strong { margin-right: auto; }
-    
-    /* Navbar buttons */
-    nav button { 
-      padding: 0.5rem;
-      font-size: 1rem;
-      width: auto;
-      height: auto;
-      min-height: auto;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: none;
-      border: 1px solid transparent;
-      cursor: pointer;
-      opacity: 0.8;
-      transition: opacity 0.2s;
-    }
-    nav button:hover { opacity: 1; }    
-    /* Form buttons with icons */
-    form button, form a[role=\"button\"] { display: flex; align-items: center; gap: 0.5rem; }\n    form button span.material-symbols-outlined, form a[role=\"button\"] span.material-symbols-outlined { flex: 0 0 auto; }    
-    /* Form buttons */
-    form div:last-child { display: flex; gap: 1rem; }
-    form div:last-child button,
-    form div:last-child a[role="button"] {
-      width: auto;
-      flex: 0 0 auto;
-    }
-  </style>
   <main class="container" x-data="addHostApp()" x-init="$store.theme.init(); init()">
-    <nav>
+    <nav x-data="{ navOpen: false }">
       <ul><li><strong>wollee</strong></li></ul>
-      <ul>
+      <button type="button" class="nav-toggle" @click="navOpen = !navOpen" title="Toggle menu">
+        <span class="material-symbols-outlined sm">menu</span>
+      </button>
+      <ul :class="{ active: navOpen }">
         <li><button type="button" @click="navigateBack()" title="Back to home">
           <span class="material-symbols-outlined sm">arrow_back</span>
         </button></li>
