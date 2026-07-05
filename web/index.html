@@ -4,18 +4,56 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>wollee</title>
-  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/blades.min.css">
+  <link rel="stylesheet" href="/static/material-symbols.css">
   <script defer src="/static/alpine.min.js"></script>
   <script src="/static/common.js"></script>
   <style>
+    /* Layout & spacing */
     main.container { padding: 1rem; }
+    nav { margin: 0.5rem 0; }
+    nav ul { margin: 0; }
+    nav li { display: inline; margin-right: 0.5rem; }
+    
+    /* Navbar */
+    nav { margin: 0.5rem 0; display: flex; align-items: center; gap: 1rem; }
+    nav ul { margin: 0; display: flex; align-items: center; gap: 0.5rem; }
     nav li { display: flex; align-items: center; }
-    nav button, nav a[role="button"] { padding: 0.5rem 0.75rem; min-height: auto; }
+    nav li strong { margin-right: auto; }
+    
+    /* Navbar buttons */
+    nav button { 
+      padding: 0.5rem;
+      font-size: 1rem;
+      width: auto;
+      height: auto;
+      min-height: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: 1px solid transparent;
+      cursor: pointer;
+      opacity: 0.8;
+      transition: opacity 0.2s;
+    }
+    nav button:hover { opacity: 1; }
+    nav button.secondary { background: none; border: none; }
+    
+    /* Action button styling */
+    table button { display: flex; align-items: center; justify-content: center; }
+    table button span:first-child { margin-right: 0.25rem; }
+    
+    /* Status indicators */
     .status-dot { display: inline-block; width: .75rem; height: .75rem; border-radius: 999px; margin-right: .5rem; }
     .status-online { background: #2fb344; }
     .status-offline { background: #d63939; }
+    
+    /* Code */
     code { white-space: nowrap; }
-    table td, table th { padding: 0.5rem; }
+    
+    /* Tables */
+    table td, table th { padding: 0.75rem; }
     dialog { padding: 0; }
     dialog article { margin: 0; }
     dialog header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 0; }
@@ -29,12 +67,20 @@
     <nav>
       <ul><li><strong>wollee</strong></li></ul>
       <ul>
-        <li><button type="button" class="secondary" @click="load()" :aria-busy="loading">Refresh</button></li>
-        <li><button type="button" class="secondary" @click="reloadConfig()" :aria-busy="loading">Reload Config</button></li>
-        <li><a href="/settings" role="button" class="secondary">Settings</a></li>
-        <li><a href="/add-host" role="button">Add Host</a></li>
-        <li><button type="button" class="secondary" @click="$store.theme.toggle()" title="Toggle dark mode" aria-label="Toggle dark mode">
-          <span x-text="$store.theme.dark ? '&#9790;' : '&#9788;'"></span>
+        <li><button type="button" @click="load()" :aria-busy="loading" title="Refresh host list">
+          <span class="material-symbols-outlined sm">refresh</span>
+        </button></li>
+        <li><button type="button" @click="reloadConfig()" :aria-busy="loading" title="Reload configuration">
+          <span class="material-symbols-outlined sm">settings_backup_restore</span>
+        </button></li>
+        <li><button type="button" @click="navigateTo('/settings')" title="Settings">
+          <span class="material-symbols-outlined sm">settings</span>
+        </button></li>
+        <li><button type="button" @click="navigateTo('/add-host')" title="Add new host">
+          <span class="material-symbols-outlined sm">add_circle</span>
+        </button></li>
+        <li><button type="button" @click="$store.theme.toggle()" title="Toggle dark mode">
+          <span class="material-symbols-outlined sm" x-text="$store.theme.dark ? 'light_mode' : 'dark_mode'"></span>
         </button></li>
       </ul>
     </nav>
@@ -53,28 +99,35 @@
         <table>
           <thead>
             <tr>
+              <th title="Wake" style="text-align: center; width: 3rem;"><span class="material-symbols-outlined xs">power_settings_new</span></th>
               <th>Status</th>
               <th>Hostname</th>
               <th>MAC</th>
               <th>IP</th>
               <th>Last seen</th>
-              <th>Actions</th>
+              <th title="Actions" style="text-align: center; width: 3rem;">Actions</th>
             </tr>
           </thead>
           <tbody>
             <template x-if="hosts.length === 0">
-              <tr><td colspan="6">No hosts registered yet.</td></tr>
+              <tr><td colspan="7">No hosts registered yet.</td></tr>
             </template>
             <template x-for="host in hosts" :key="host.mac">
               <tr>
+                <td style="text-align: center;">
+                  <button type="button" @click="wake(host.mac)" :disabled="loading" title="Send wake-on-LAN packet to this host">
+                    <span class="material-symbols-outlined sm">power_settings_new</span>
+                  </button>
+                </td>
                 <td><span class="status-dot" :class="host.active ? 'status-online' : 'status-offline'"></span><span x-text="host.active ? 'Online' : 'Offline'"></span></td>
                 <td x-text="host.hostname"></td>
                 <td><code x-text="host.mac"></code></td>
                 <td x-text="host.ip"></td>
                 <td x-text="new Date(host.lastSeen).toLocaleString()"></td>
-                <td>
-                  <button type="button" @click="wake(host.mac)" :disabled="loading">Wake</button>
-                  <button type="button" class="secondary" @click="deleteHost(host.mac)" :disabled="loading">Delete</button>
+                <td style="text-align: center;">
+                  <button type="button" @click="deleteHost(host.mac)" :disabled="loading" title="Delete this host">
+                    <span class="material-symbols-outlined sm">delete</span>
+                  </button>
                 </td>
               </tr>
             </template>
@@ -105,6 +158,9 @@
           } finally {
             this.loading = false;
           }
+        },
+        navigateTo(path) {
+          window.location.href = path;
         },
         async wake(mac) {
           this.error = '';

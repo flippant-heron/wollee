@@ -99,10 +99,10 @@ func buildServerService(configPath string) (*serverRuntime, error) {
 
 	interactive := sysservice.Interactive()
 	logger := appservice.NewLogger(interactive)
-	
+
 	// Create config manager for hot-reload
 	cfgMgr := config.NewManager(cfg.SourcePath, cfg.Server)
-	
+
 	runner, err := server.New(cfgMgr, registry, logger)
 	if err != nil {
 		return nil, err

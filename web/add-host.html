@@ -4,23 +4,56 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Add Host - wollee</title>
-  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/blades.min.css">
+  <link rel="stylesheet" href="/static/material-symbols.css">
   <script defer src="/static/alpine.min.js"></script>
   <script src="/static/common.js"></script>
 </head>
 <body>
   <style>
+    /* Layout & spacing */
     main.container { padding: 1rem; }
+    nav { margin: 0.5rem 0; display: flex; align-items: center; gap: 1rem; }
+    nav ul { margin: 0; display: flex; align-items: center; gap: 0.5rem; }
     nav li { display: flex; align-items: center; }
-    nav button, nav a[role="button"] { padding: 0.5rem 0.75rem; min-height: auto; }
+    nav li strong { margin-right: auto; }
+    
+    /* Navbar buttons */
+    nav button { 
+      padding: 0.5rem;
+      font-size: 1rem;
+      width: auto;
+      height: auto;
+      min-height: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: 1px solid transparent;
+      cursor: pointer;
+      opacity: 0.8;
+      transition: opacity 0.2s;
+    }
+    nav button:hover { opacity: 1; }    
+    /* Form buttons with icons */
+    form button, form a[role=\"button\"] { display: flex; align-items: center; gap: 0.5rem; }\n    form button span.material-symbols-outlined, form a[role=\"button\"] span.material-symbols-outlined { flex: 0 0 auto; }    
+    /* Form buttons */
+    form div:last-child { display: flex; gap: 1rem; }
+    form div:last-child button,
+    form div:last-child a[role="button"] {
+      width: auto;
+      flex: 0 0 auto;
+    }
   </style>
   <main class="container" x-data="addHostApp()" x-init="$store.theme.init(); init()">
     <nav>
       <ul><li><strong>wollee</strong></li></ul>
       <ul>
-        <li><a href="/">Back to Hosts</a></li>
-        <li><button type="button" class="secondary" @click="$store.theme.toggle()" title="Toggle dark mode" aria-label="Toggle dark mode">
-          <span x-text="$store.theme.dark ? '&#9790;' : '&#9788;'"></span>
+        <li><button type="button" @click="navigateBack()" title="Back to home">
+          <span class="material-symbols-outlined sm">arrow_back</span>
+        </button></li>
+        <li><button type="button" @click="$store.theme.toggle()" title="Toggle dark mode">
+          <span class="material-symbols-outlined sm" x-text="$store.theme.dark ? 'light_mode' : 'dark_mode'"></span>
         </button></li>
       </ul>
     </nav>
@@ -52,9 +85,15 @@
           <label for="ip">IP address</label>
           <input id="ip" type="text" x-model="form.ip" placeholder="e.g., 192.168.1.100" required>
         </div>
-        <div>
-          <button type="submit" :disabled="loading">Add Host</button>
-          <a href="/" role="button" class="secondary">Cancel</a>
+        <div style="display: flex; gap: 1rem;">
+          <button type="submit" :disabled="loading" style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="material-symbols-outlined sm">add_circle</span>
+            <span>Add Host</span>
+          </button>
+          <button type="button" @click="navigateBack()" style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="material-symbols-outlined sm">cancel</span>
+            <span>Cancel</span>
+          </button>
         </div>
       </form>
     </article>
@@ -69,6 +108,9 @@
         success: false,
         init() {
           // Form is ready
+        },
+        navigateBack() {
+          window.location.href = '/';
         },
         async addHost() {
           this.error = '';

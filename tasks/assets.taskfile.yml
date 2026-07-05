@@ -2,21 +2,24 @@ version: '3'
 
 vars:
   ALPINE_VERSION: 3.15.12
-  PICO_VERSION: 2.1.1
+  BLADES_VERSION: 2.2.0
+  MATERIAL_SYMBOLS_VERSION: 0.45.5
   WEB_STATIC: web/static
 
 tasks:
-  dl:
+  get:
     desc: Download embedded web assets from npm package distributions
     cmds:
       - mkdir -p {{.ROOT_DIR}}/{{.WEB_STATIC}}
-      - >-
+      - >
         tmp_dir="$(mktemp -d)" &&
         trap "rm -rf $tmp_dir" EXIT &&
         cd "$tmp_dir" &&
-        npm pack alpinejs@{{.ALPINE_VERSION}} @picocss/pico@{{.PICO_VERSION}} &&
-        mkdir alpinejs picocss &&
+        npm pack alpinejs@{{.ALPINE_VERSION}} @anyblades/blades@{{.BLADES_VERSION}} material-symbols@{{.MATERIAL_SYMBOLS_VERSION}} &&
+        mkdir alpinejs blades material-symbols &&
         tar -xzf alpinejs-{{.ALPINE_VERSION}}.tgz -C alpinejs &&
-        tar -xzf picocss-pico-{{.PICO_VERSION}}.tgz -C picocss &&
+        tar -xzf anyblades-blades-{{.BLADES_VERSION}}.tgz -C blades &&
+        tar -xzf material-symbols-{{.MATERIAL_SYMBOLS_VERSION}}.tgz -C material-symbols &&
         cp alpinejs/package/dist/cdn.min.js {{.ROOT_DIR}}/{{.WEB_STATIC}}/alpine.min.js &&
-        cp picocss/package/css/pico.min.css {{.ROOT_DIR}}/{{.WEB_STATIC}}/pico.min.css
+        cp blades/package/assets/blades.css {{.ROOT_DIR}}/{{.WEB_STATIC}}/blades.min.css &&
+        cp material-symbols/package/material-symbols-outlined.woff2 {{.ROOT_DIR}}/{{.WEB_STATIC}}/material-symbols-outlined.woff2

@@ -1,6 +1,7 @@
 config.yaml
-web/static/alpine.min.js
-web/static/pico.min.css
+web/static/*
+!web/static/README.txt
+!web/static/common.js
 *.ignore
 **/*.ignore/*
 

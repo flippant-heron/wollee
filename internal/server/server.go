@@ -102,7 +102,13 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 		return nil, fmt.Errorf("read settings.html: %w", err)
 	}
 
-	for _, requiredAsset := range []string{"alpine.min.js", "pico.min.css"} {
+	requiredAssets := []string{
+		"alpine.min.js",
+		"blades.min.css",
+		"material-symbols.css",
+		"material-symbols-outlined.woff2",
+	}
+	for _, requiredAsset := range requiredAssets {
 		if _, err := fs.ReadFile(staticFS, requiredAsset); err != nil {
 			return nil, fmt.Errorf("missing embedded asset %q: run `task assets:dl` before build", requiredAsset)
 		}

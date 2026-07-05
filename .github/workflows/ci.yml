@@ -41,7 +41,7 @@ jobs:
           go-version-file: go.mod
       - run: go mod download
       - run: go install github.com/go-task/task/v3/cmd/task@latest
-      - run: "$(go env GOPATH)/bin/task assets:dl"
+      - run: "$(go env GOPATH)/bin/task assets:get"
       - run: "$(go env GOPATH)/bin/task build:all"
       - uses: actions/upload-artifact@v4
         with:
