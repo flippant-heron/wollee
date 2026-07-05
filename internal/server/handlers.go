@@ -111,6 +111,11 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if host.Disabled {
+		a.writeError(w, http.StatusForbidden, "host is disabled")
+		return
+	}
+
 	cfg := a.cfgMgr.Get()
 	if err := internalwol.SendMagicPacket(host.MAC, cfg.Network); err != nil {
 		a.logger.Error("send magic packet", err, "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
@@ -304,6 +309,86 @@ func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
 
 	a.logger.Info("deleted host", "mac", normalized)
 	a.writeJSON(w, http.StatusOK, map[string]string{"message": "host deleted"})
+}
+
+func (a *App) handleDisableHost(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	mac := strings.TrimSpace(r.PathValue("mac"))
+	if mac == "" {
+		a.writeError(w, http.StatusBadRequest, "MAC address is required")
+		return
+	}
+
+	normalized, err := internalwol.NormalizeMAC(mac)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		return
+	}
+
+	host, ok := a.registry.FindByMAC(normalized)
+	if !ok {
+		a.writeError(w, http.StatusNotFound, "host not found")
+		return
+	}
+
+	if host.Disabled {
+		a.writeError(w, http.StatusConflict, "host is already disabled")
+		return
+	}
+
+	host.Disabled = true
+	if err := a.registry.Upsert(host); err != nil {
+		a.logger.Error("disable host", err, "mac", normalized)
+		a.writeError(w, http.StatusInternalServerError, "failed to disable host")
+		return
+	}
+
+	a.logger.Info("disabled host", "mac", normalized)
+	a.writeJSON(w, http.StatusOK, host)
+}
+
+func (a *App) handleEnableHost(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	mac := strings.TrimSpace(r.PathValue("mac"))
+	if mac == "" {
+		a.writeError(w, http.StatusBadRequest, "MAC address is required")
+		return
+	}
+
+	normalized, err := internalwol.NormalizeMAC(mac)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		return
+	}
+
+	host, ok := a.registry.FindByMAC(normalized)
+	if !ok {
+		a.writeError(w, http.StatusNotFound, "host not found")
+		return
+	}
+
+	if !host.Disabled {
+		a.writeError(w, http.StatusConflict, "host is already enabled")
+		return
+	}
+
+	host.Disabled = false
+	if err := a.registry.Upsert(host); err != nil {
+		a.logger.Error("enable host", err, "mac", normalized)
+		a.writeError(w, http.StatusInternalServerError, "failed to enable host")
+		return
+	}
+
+	a.logger.Info("enabled host", "mac", normalized)
+	a.writeJSON(w, http.StatusOK, host)
 }
 
 func (a *App) handleConfigReload(w http.ResponseWriter, r *http.Request) {

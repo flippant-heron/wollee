@@ -5,68 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>wollee</title>
   <link rel="stylesheet" href="/static/blades.min.css">
+  <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/material-symbols.css">
   <script defer src="/static/alpine.min.js"></script>
   <script src="/static/common.js"></script>
-  <style>
-    /* Layout & spacing */
-    main.container { padding: 1rem; }
-    nav { margin: 0.5rem 0; }
-    nav ul { margin: 0; }
-    nav li { display: inline; margin-right: 0.5rem; }
-    
-    /* Navbar */
-    nav { margin: 0.5rem 0; display: flex; align-items: center; gap: 1rem; }
-    nav ul { margin: 0; display: flex; align-items: center; gap: 0.5rem; }
-    nav li { display: flex; align-items: center; }
-    nav li strong { margin-right: auto; }
-    
-    /* Navbar buttons */
-    nav button { 
-      padding: 0.5rem;
-      font-size: 1rem;
-      width: auto;
-      height: auto;
-      min-height: auto;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: none;
-      border: 1px solid transparent;
-      cursor: pointer;
-      opacity: 0.8;
-      transition: opacity 0.2s;
-    }
-    nav button:hover { opacity: 1; }
-    nav button.secondary { background: none; border: none; }
-    
-    /* Action button styling */
-    table button { display: flex; align-items: center; justify-content: center; }
-    table button span:first-child { margin-right: 0.25rem; }
-    
-    /* Status indicators */
-    .status-dot { display: inline-block; width: .75rem; height: .75rem; border-radius: 999px; margin-right: .5rem; }
-    .status-online { background: #2fb344; }
-    .status-offline { background: #d63939; }
-    
-    /* Code */
-    code { white-space: nowrap; }
-    
-    /* Tables */
-    table td, table th { padding: 0.75rem; }
-    dialog { padding: 0; }
-    dialog article { margin: 0; }
-    dialog header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 0; }
-    dialog header h3 { margin: 0; }
-    dialog header button { padding: 0; min-height: auto; }
-    dialog footer { display: flex; gap: 0.5rem; justify-content: flex-end; }
-  </style>
 </head>
 <body>
   <main class="container" x-data="wolleeApp()" x-init="$store.theme.init(); load()">
-    <nav>
+    <nav x-data="{ navOpen: false }">
       <ul><li><strong>wollee</strong></li></ul>
-      <ul>
+      <button type="button" class="nav-toggle" @click="navOpen = !navOpen" title="Toggle menu">
+        <span class="material-symbols-outlined sm">menu</span>
+      </button>
+      <ul :class="{ active: navOpen }">
         <li><button type="button" @click="load()" :aria-busy="loading" title="Refresh host list">
           <span class="material-symbols-outlined sm">refresh</span>
         </button></li>
@@ -100,31 +51,36 @@
           <thead>
             <tr>
               <th title="Wake" style="text-align: center; width: 3rem;"><span class="material-symbols-outlined xs">power_settings_new</span></th>
+              <th style="text-align: center; width: 1.5rem;"></th>
               <th>Status</th>
               <th>Hostname</th>
               <th>MAC</th>
               <th>IP</th>
               <th>Last seen</th>
-              <th title="Actions" style="text-align: center; width: 3rem;">Actions</th>
+              <th title="Actions" style="text-align: center; width: 7rem;">Actions</th>
             </tr>
           </thead>
           <tbody>
             <template x-if="hosts.length === 0">
-              <tr><td colspan="7">No hosts registered yet.</td></tr>
+              <tr><td colspan="8">No hosts registered yet.</td></tr>
             </template>
             <template x-for="host in hosts" :key="host.mac">
-              <tr>
+              <tr :class="{ disabled: host.disabled }">
                 <td style="text-align: center;">
                   <button type="button" @click="wake(host.mac)" :disabled="loading" title="Send wake-on-LAN packet to this host">
                     <span class="material-symbols-outlined sm">power_settings_new</span>
                   </button>
                 </td>
-                <td><span class="status-dot" :class="host.active ? 'status-online' : 'status-offline'"></span><span x-text="host.active ? 'Online' : 'Offline'"></span></td>
+                <td style="text-align: center;"><span class="status-dot" :class="host.disabled ? 'status-disabled' : (host.active ? 'status-online' : 'status-offline')"></span></td>
+                <td x-text="host.disabled ? 'Disabled' : (host.active ? 'Online' : 'Offline')"></td>
                 <td x-text="host.hostname"></td>
                 <td><code x-text="host.mac"></code></td>
                 <td x-text="host.ip"></td>
                 <td x-text="new Date(host.lastSeen).toLocaleString()"></td>
-                <td style="text-align: center;">
+                <td style="text-align: center; display: flex; gap: 0.25rem; justify-content: center;">
+                  <button type="button" @click="host.disabled ? enableHost(host.mac) : disableHost(host.mac)" :disabled="loading" :title="host.disabled ? 'Enable this host' : 'Disable this host'">
+                    <span class="material-symbols-outlined sm" x-text="host.disabled ? 'visibility_off' : 'visibility'"></span>
+                  </button>
                   <button type="button" @click="deleteHost(host.mac)" :disabled="loading" title="Delete this host">
                     <span class="material-symbols-outlined sm">delete</span>
                   </button>
@@ -205,6 +161,44 @@
           } catch (error) {
             this.error = error.message;
             showToast(`Failed to delete: ${error.message}`, 4000, 'error');
+          }
+        },
+        async disableHost(mac) {
+          this.error = '';
+          const host = this.hosts.find(h => h.mac === mac);
+          const hostname = host?.hostname || mac;
+          try {
+            const response = await fetch(`/hosts/${mac}/disable`, {
+              method: 'PATCH'
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({ error: 'disable request failed' }));
+              throw new Error(payload.error || `disable request failed: ${response.status}`);
+            }
+            showToast(`${hostname} disabled successfully`, 2000, 'success');
+            await this.load();
+          } catch (error) {
+            this.error = error.message;
+            showToast(`Failed to disable: ${error.message}`, 4000, 'error');
+          }
+        },
+        async enableHost(mac) {
+          this.error = '';
+          const host = this.hosts.find(h => h.mac === mac);
+          const hostname = host?.hostname || mac;
+          try {
+            const response = await fetch(`/hosts/${mac}/enable`, {
+              method: 'PATCH'
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({ error: 'enable request failed' }));
+              throw new Error(payload.error || `enable request failed: ${response.status}`);
+            }
+            showToast(`${hostname} enabled successfully`, 2000, 'success');
+            await this.load();
+          } catch (error) {
+            this.error = error.message;
+            showToast(`Failed to enable: ${error.message}`, 4000, 'error');
           }
         },
         async reloadConfig() {
