@@ -4,26 +4,99 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Settings - wollee</title>
-  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/blades.min.css">
+  <link rel="stylesheet" href="/static/material-symbols.css">
   <script defer src="/static/alpine.min.js"></script>
   <script src="/static/common.js"></script>
   <style>
+    /* Layout & spacing */
     main.container { padding: 1rem; }
+    nav { margin: 0.5rem 0; }
+    nav ul { margin: 0; }
+    nav li { display: inline; margin-right: 0.5rem; }
+    
+    /* Navbar */
+    nav { margin: 0.5rem 0; display: flex; align-items: center; gap: 1rem; }
+    nav ul { margin: 0; display: flex; align-items: center; gap: 0.5rem; }
     nav li { display: flex; align-items: center; }
-    nav button, nav a[role="button"] { padding: 0.5rem 0.75rem; min-height: auto; }
-    .settings-section { margin-bottom: 1.5rem; }
+    nav li strong { margin-right: auto; }
+    
+    /* Navbar buttons */
+    nav button { 
+      padding: 0.5rem;
+      font-size: 1rem;
+      width: auto;
+      height: auto;
+      min-height: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: 1px solid transparent;
+      cursor: pointer;
+      opacity: 0.8;
+      transition: opacity 0.2s;
+    }
+    nav button:hover { opacity: 1; }
+    
+    /* Sections */
+    .settings-section { margin-bottom: 2rem; }
     .settings-section h2 { font-size: 1.2rem; margin-bottom: 1rem; }
+    
+    /* Form fields & groups */
     .field-group { margin-bottom: 1rem; }
     .help-text { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
-    .user-list { background: #f5f5f5; padding: 1rem; border-radius: 0.5rem; margin-top: 0.5rem; }
-    .user-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; }
-    .user-item-id { font-family: monospace; }
+    
+    /* Forms & action buttons */
+    form div:last-child { display: flex; gap: 1rem; }
+    form div:last-child button,
+    form div:last-child a[role="button"] {
+      width: auto;
+      flex: 0 0 auto;
+    }
+    
+    /* Input row (Add User pattern) */
     .input-row { display: flex; gap: 0.5rem; align-items: flex-end; }
     .input-row input { flex: 1; }
+    .input-row button { width: auto; flex: 0 0 auto; }
+    
+    /* User list styling */
+    .user-list { background: #f5f5f5; padding: 1rem; border-radius: 0.5rem; margin-top: 0.5rem; }
+    .user-item { 
+      display: flex; 
+      align-items: center; 
+      padding: 0.75rem;
+      border-bottom: 1px solid #d0d6dd;
+      gap: 1rem;
+    }
+    .user-item:last-child { border-bottom: none; }
+    .user-item-id { font-family: monospace; font-size: 0.9rem; flex: 0 0 auto; }
+    .user-item-actions { display: flex; gap: 0.5rem; }
+    .user-item-actions button {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.25rem;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.9rem;
+    }
+    
+    /* Button groups */
     .button-group { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    .button-group button { flex: 0 0 auto; }
+    
+    /* Buttons with icons */
+    button { display: flex; align-items: center; justify-content: center; }
+    button span.material-symbols-outlined { flex: 0 0 auto; margin-right: 0.25rem; }
+    button span:not(.material-symbols-outlined) { white-space: nowrap; }
+    
+    /* Token status indicators */
     .token-status { padding: 0.5rem; border-radius: 0.25rem; font-size: 0.9rem; margin: 0.5rem 0; }
     .token-status.set { background: #e8f5e9; color: #2e7d32; }
     .token-status.notset { background: #fff3e0; color: #e65100; }
+    
+    /* Modal/Dialog styling */
     dialog { padding: 0; }
     dialog article { margin: 0; }
     dialog header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 0; }
@@ -37,9 +110,11 @@
     <nav>
       <ul><li><strong>wollee</strong></li></ul>
       <ul>
-        <li><a href="/">Back to Hosts</a></li>
-        <li><button type="button" class="secondary" @click="$store.theme.toggle()" title="Toggle dark mode" aria-label="Toggle dark mode">
-          <span x-text="$store.theme.dark ? '&#9790;' : '&#9788;'"></span>
+        <li><button type="button" @click="navigateBack()" title="Back to home">
+          <span class="material-symbols-outlined sm">arrow_back</span>
+        </button></li>
+        <li><button type="button" @click="$store.theme.toggle()" title="Toggle dark mode">
+          <span class="material-symbols-outlined sm" x-text="$store.theme.dark ? 'light_mode' : 'dark_mode'"></span>
         </button></li>
       </ul>
     </nav>
@@ -118,21 +193,36 @@
 
           <div class="input-row">
             <input type="text" x-model="newUserId" placeholder="Enter user ID" @keydown.enter="addUser()">
-            <button type="button" @click="addUser()" :disabled="loading">Add User</button>
+            <button type="button" @click="addUser()" :disabled="loading">
+              <span class="material-symbols-outlined sm">person_add</span>
+              <span>Add User</span>
+            </button>
           </div>
 
           <div x-show="settings.users.length > 0" class="user-list">
             <template x-for="(userId, index) in settings.users" :key="index">
-              <div class="user-item" style="gap: 1rem;">
-                <div x-show="editingIndex !== index" style="display: flex; flex: 1; gap: 0.5rem; align-items: center;">
-                  <span class="user-item-id" x-text="userId" style="flex: 1;"></span>
-                  <button type="button" class="secondary" @click="startEdit(index, userId)" :disabled="loading" style="flex: 0 0 auto;">Edit</button>
-                  <button type="button" class="secondary" @click="removeUser(index)" :disabled="loading" style="flex: 0 0 auto;">Remove</button>
+              <div class="user-item">
+                <div x-show="editingIndex !== index" style="display: flex; align-items: center; width: 100%; gap: 1rem;">
+                  <span class="user-item-id" x-text="userId"></span>
+                  <div style="margin-left: auto; display: flex; gap: 0.5rem;">
+                    <button type="button" @click="startEdit(index, userId)" :disabled="loading" title="Edit this user ID">
+                      <span class="material-symbols-outlined sm">edit</span>
+                    </button>
+                    <button type="button" @click="removeUser(index)" :disabled="loading" title="Remove this user">
+                      <span class="material-symbols-outlined sm">delete</span>
+                    </button>
+                  </div>
                 </div>
-                <div x-show="editingIndex === index" style="display: flex; flex: 1; gap: 0.5rem; align-items: center;">
+                <div x-show="editingIndex === index" style="display: flex; align-items: center; width: 100%; gap: 1rem;">
                   <input type="text" x-model="editingValue" placeholder="Enter user ID" style="flex: 1;">
-                  <button type="button" @click="saveEdit(index)" :disabled="loading" style="flex: 0 0 auto;">Save</button>
-                  <button type="button" class="secondary" @click="cancelEdit()" :disabled="loading" style="flex: 0 0 auto;">Cancel</button>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <button type="button" @click="saveEdit(index)" :disabled="loading" title="Save changes">
+                      <span class="material-symbols-outlined sm">check</span>
+                    </button>
+                    <button type="button" @click="cancelEdit()" :disabled="loading" title="Cancel editing">
+                      <span class="material-symbols-outlined sm">close</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </template>
@@ -145,12 +235,21 @@
 
       <!-- Action Buttons -->
       <div class="button-group">
-        <button type="button" @click="saveSettings()" :disabled="loading || !hasChanges">
+        <button type="button" @click="saveSettings()" :disabled="loading || !hasChanges" style="display: flex; align-items: center; gap: 0.5rem;">
+          <span class="material-symbols-outlined sm" x-show="!loading">save</span>
+          <span class="material-symbols-outlined sm" x-show="loading" style="animation: spin 1s linear infinite;">sync</span>
           <span x-show="!loading">Save Settings</span>
           <span x-show="loading">Saving...</span>
         </button>
-        <button type="button" class="secondary" @click="resetSettings()" :disabled="loading || !hasChanges">Reset Changes</button>
+        <button type="button" class="secondary" @click="resetSettings()" :disabled="loading || !hasChanges" style="display: flex; align-items: center; gap: 0.5rem;">
+          <span class="material-symbols-outlined sm">refresh</span>
+          <span>Reset Changes</span>
+        </button>
       </div>
+      
+      <style>
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      </style>
     </article>
   </main>
 
@@ -205,6 +304,10 @@
           if (!this.error) {
             console.log('Settings loaded successfully:', this.settings);
           }
+        },
+
+        navigateBack() {
+          window.location.href = '/';
         },
 
         async loadSettings() {

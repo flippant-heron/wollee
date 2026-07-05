@@ -49,7 +49,7 @@ There are many frameworks which try to work across proxies, traverse subnets, ma
 
 ```bash
 cp config.yaml.example config.yaml
-task assets:dl
+task assets:get
 go run ./cmd/server run --config ./config.yaml
 ```
 
@@ -137,5 +137,5 @@ Uses [taskfiles](https://taskfile.dev) for development.
 - `task lint`
 - `task test`
 - `task build:local`
-- `task assets:dl`
+- `task assets:get`
 - `task build:release`

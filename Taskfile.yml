@@ -5,21 +5,43 @@ includes:
   build: ./tasks/build.taskfile.yml
 
 tasks:
-  test:
-    desc: Run unit tests
+  default:
+    desc: Show available tasks
     cmds:
-      - go test ./...
+      - task --list
 
-  coverage:
-    desc: Run unit tests with coverage report
+  test:
+    desc: Run all tests
+    cmds:
+      - go test -v ./...
+
+  test:cover:
+    desc: Run tests with coverage
     cmds:
       - go test -coverprofile=coverage.out ./...
-      - go tool cover -html=coverage.out
+      - go tool cover -html=coverage.out -o coverage.html
 
   lint:
-    desc: Run lint checks
+    desc: Run linter
     cmds:
+      # - golangci-lint run
       - go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run --timeout=5m --enable=errcheck --enable=unused
+
+  fmt:
+    desc: Format code
+    cmds:
+      - go fmt ./...
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.BIN_DIR}}
+      - rm -f coverage.out coverage.html
+
+  mod:tidy:
+    desc: Tidy Go modules
+    cmds:
+      - go mod tidy
 
   build:local:
     desc: Build local binaries (current OS)

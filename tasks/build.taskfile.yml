@@ -14,7 +14,7 @@ tasks:
     status:
       - test -f web/static/alpine.min.js && test -f web/static/pico.min.css
     cmds:
-      - task: assets:dl
+      - task: assets:get
 
   _build:
     internal: true
