@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flippant-heron/wollee/internal/auth"
 	"github.com/flippant-heron/wollee/internal/telegram"
 	internalwol "github.com/flippant-heron/wollee/internal/wol"
 )
@@ -586,4 +587,283 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 		Whoami:        verifiedCfg.Whoami,
 	}
 	a.writeJSON(w, http.StatusOK, response)
+}
+
+// Auth-related request/response types
+type loginRequest struct {
+	Password string `json:"password"`
+}
+
+type loginResponse struct {
+	Token   string `json:"token"`
+	Message string `json:"message"`
+}
+
+type setupRequest struct {
+	Password string `json:"password"`
+}
+
+type setupResponse struct {
+	Token   string `json:"token"`
+	Message string `json:"message"`
+}
+
+type authStatusResponse struct {
+	PasswordSet bool `json:"passwordSet"`
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
+type changePasswordResponse struct {
+	Message string `json:"message"`
+}
+
+// handleLogin handles user login by validating password and returning JWT token
+func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	cfg := a.cfgMgr.Get()
+
+	// If no password hash is set, return error
+	if cfg.PasswordHash == "" {
+		a.writeError(w, http.StatusUnauthorized, "server not yet configured with password")
+		return
+	}
+
+	var req loginRequest
+	if err := a.decodeJSON(r, &req); err != nil {
+		a.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if req.Password == "" {
+		a.writeError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	// Verify password using Argon2
+	hasher := &auth.Hasher{}
+	if err := hasher.VerifyPassword(cfg.PasswordHash, req.Password); err != nil {
+		a.logger.Info("failed login attempt")
+		a.writeError(w, http.StatusUnauthorized, "invalid password")
+		return
+	}
+
+	// Generate JWT token
+	tokenManager := auth.NewTokenManager(cfg.JWTSecret)
+	token, err := tokenManager.GenerateToken()
+	if err != nil {
+		a.logger.Error("generate token", err)
+		a.writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	// Set secure cookie using gorilla/securecookie
+	cookie := &http.Cookie{
+		Name:     CookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(auth.TokenExpiration.Seconds()),
+		HttpOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
+
+	a.logger.Info("user logged in successfully")
+	a.writeJSON(w, http.StatusOK, loginResponse{
+		Token:   token,
+		Message: "login successful",
+	})
+}
+
+// handleSetupPassword handles initial password setup
+func (a *App) handleSetupPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	cfg := a.cfgMgr.Get()
+
+	// If password is already set, deny further setup
+	if cfg.PasswordHash != "" {
+		a.writeError(w, http.StatusForbidden, "password is already configured")
+		return
+	}
+
+	var req setupRequest
+	if err := a.decodeJSON(r, &req); err != nil {
+		a.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if req.Password == "" {
+		a.writeError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	// Hash password using Argon2id
+	hasher := &auth.Hasher{}
+	hash, err := hasher.HashPassword(req.Password)
+	if err != nil {
+		a.logger.Error("hash password", err)
+		a.writeError(w, http.StatusInternalServerError, "failed to process password")
+		return
+	}
+
+	// Update config with password hash
+	cfg.PasswordHash = hash
+	if err := a.cfgMgr.Update(cfg); err != nil {
+		a.logger.Error("update config with password", err)
+		a.writeError(w, http.StatusInternalServerError, "failed to save password")
+		return
+	}
+
+	// Reload config to verify
+	if err := a.cfgMgr.Reload(); err != nil {
+		a.logger.Error("reload config after password setup", err)
+		a.writeError(w, http.StatusInternalServerError, "password saved but verification failed")
+		return
+	}
+
+	// Get fresh config after reload
+	freshCfg := a.cfgMgr.Get()
+
+	// Generate JWT token for immediate login
+	tokenManager := auth.NewTokenManager(freshCfg.JWTSecret)
+	token, err := tokenManager.GenerateToken()
+	if err != nil {
+		a.logger.Error("generate token after setup", err)
+		a.writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	// Set secure cookie
+	cookie := &http.Cookie{
+		Name:     CookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(auth.TokenExpiration.Seconds()),
+		HttpOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
+
+	a.logger.Info("password configured successfully")
+	a.writeJSON(w, http.StatusOK, setupResponse{
+		Token:   token,
+		Message: "password configured successfully",
+	})
+}
+
+// handleLogout clears the authentication cookie
+func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Clear cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     CookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	a.logger.Info("user logged out")
+	a.writeJSON(w, http.StatusOK, map[string]string{"message": "logout successful"})
+}
+
+// handleAuthStatus returns the authentication status
+func (a *App) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	cfg := a.cfgMgr.Get()
+	a.writeJSON(w, http.StatusOK, authStatusResponse{
+		PasswordSet: cfg.PasswordHash != "",
+	})
+}
+
+// handleChangePassword handles authenticated password changes
+func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Verify authentication
+	if !a.isAuthenticatedRequest(r) {
+		a.writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	cfg := a.cfgMgr.Get()
+
+	// If no password is currently set, this is an error
+	if cfg.PasswordHash == "" {
+		a.writeError(w, http.StatusForbidden, "no password currently configured")
+		return
+	}
+
+	var req changePasswordRequest
+	if err := a.decodeJSON(r, &req); err != nil {
+		a.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		a.writeError(w, http.StatusBadRequest, "current password and new password are required")
+		return
+	}
+
+	// Verify current password
+	hasher := &auth.Hasher{}
+	if err := hasher.VerifyPassword(cfg.PasswordHash, req.CurrentPassword); err != nil {
+		a.logger.Info("failed password change attempt - invalid current password")
+		a.writeError(w, http.StatusUnauthorized, "invalid current password")
+		return
+	}
+
+	// Hash new password
+	newHash, err := hasher.HashPassword(req.NewPassword)
+	if err != nil {
+		a.logger.Error("hash new password", err)
+		a.writeError(w, http.StatusInternalServerError, "failed to process new password")
+		return
+	}
+
+	// Update config with new password hash
+	cfg.PasswordHash = newHash
+	if err := a.cfgMgr.Update(cfg); err != nil {
+		a.logger.Error("update config with new password", err)
+		a.writeError(w, http.StatusInternalServerError, "failed to save new password")
+		return
+	}
+
+	// Reload config to verify
+	if err := a.cfgMgr.Reload(); err != nil {
+		a.logger.Error("reload config after password change", err)
+		a.writeError(w, http.StatusInternalServerError, "password changed but verification failed")
+		return
+	}
+
+	a.logger.Info("password changed successfully")
+	a.writeJSON(w, http.StatusOK, changePasswordResponse{
+		Message: "password changed successfully",
+	})
 }

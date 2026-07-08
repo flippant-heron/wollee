@@ -15,18 +15,21 @@ import (
 )
 
 type App struct {
-	cfgMgr         *config.Manager
-	logger         *appservice.Logger
-	registry       *Registry
-	httpSrv        *http.Server
-	telegram       *telegram.Service
-	telegramCtx    context.Context
-	telegramCancel context.CancelFunc
-	staticFS       fs.FS
-	indexHTML      []byte
-	addHostHTML    []byte
-	settingsHTML   []byte
-	reloadTicker   *time.Ticker
+	cfgMgr          *config.Manager
+	logger          *appservice.Logger
+	registry        *Registry
+	httpSrv         *http.Server
+	telegram        *telegram.Service
+	telegramCtx     context.Context
+	telegramCancel  context.CancelFunc
+	staticFS        fs.FS
+	indexHTML       []byte
+	addHostHTML     []byte
+	settingsHTML    []byte
+	loginHTML       []byte
+	reloadTicker    *time.Ticker
+	registerLimiter *RateLimiter
+	wakeLimiter     *RateLimiter
 }
 
 type registerRequest struct {
@@ -102,6 +105,11 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 		return nil, fmt.Errorf("read settings.html: %w", err)
 	}
 
+	loginHTML, err := webassets.Assets.ReadFile("login.html")
+	if err != nil {
+		return nil, fmt.Errorf("read login.html: %w", err)
+	}
+
 	requiredAssets := []string{
 		"alpine.min.js",
 		"blades.min.css",
@@ -117,13 +125,16 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 
 	cfg := cfgMgr.Get()
 	app := &App{
-		cfgMgr:       cfgMgr,
-		logger:       logger,
-		registry:     registry,
-		staticFS:     staticFS,
-		indexHTML:    indexHTML,
-		addHostHTML:  addHostHTML,
-		settingsHTML: settingsHTML,
+		cfgMgr:          cfgMgr,
+		logger:          logger,
+		registry:        registry,
+		staticFS:        staticFS,
+		indexHTML:       indexHTML,
+		addHostHTML:     addHostHTML,
+		settingsHTML:    settingsHTML,
+		loginHTML:       loginHTML,
+		registerLimiter: NewRateLimiter(60, time.Minute), // 10 registrations per minute per IP
+		wakeLimiter:     NewRateLimiter(30, time.Minute), // 30 wake requests per minute per IP
 	}
 
 	app.telegram = telegram.New(cfg.Token, cfg.Users, app, logger, cfg.Whoami)

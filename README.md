@@ -99,12 +99,13 @@ Agent:
    - Set the token in the server settings page, or manually store this token securely in your `config.yaml` as `server.token`
    - Note that for security reasons, the server UI will only allow you to set the token when it is empty, and clearing it must be done by manually editing the config file.
    - Note that an `unauthorized` message on Telegram means it is connected and working, but your user ID hasn't been added to the whitelist
+   - It is recommended that you use the `/mybots` command from botfather to harden the telegram bot. Navigate to `Bot Settings > Allow Groups` and set this to off to prevent your bot from being added to any group chats.
 
 2. **Discover your Telegram user ID**:
    - When your server is running and connected to Telegram, message your bot and send `/whoami`
    - The bot will reply with your user ID (e.g., `Your Telegram user ID is: 123456789`)
    - Add the ID to the allowed user list in the settings, or to `server.users` in your `config.yaml`
-   - Note that for the sake of simplicity, we haven't locked down the settings endpoint, so devices on your network can inject custom Telegram User Ids at will. You are responsible for the security of that endpoint.
+   - You can disable the ability for public users to use the whoami function with the settings menu.
 
 3. **Configuration example**:
 

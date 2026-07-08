@@ -33,6 +33,9 @@
         <li><button type="button" @click="$store.theme.toggle()" title="Toggle dark mode">
           <span class="material-symbols-outlined sm" x-text="$store.theme.dark ? 'light_mode' : 'dark_mode'"></span>
         </button></li>
+        <li><button type="button" @click="logout()" title="Logout">
+          <span class="material-symbols-outlined sm">logout</span>
+        </button></li>
       </ul>
     </nav>
 
@@ -218,6 +221,9 @@
             this.error = error.message;
             showToast(`Reload failed: ${error.message}`, 4000, 'error');
           }
+        },
+        async logout() {
+          await authUtils.logout();
         }
       };
     }

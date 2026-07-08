@@ -141,6 +141,72 @@
         </div>
       </div>
 
+      <!-- Security Settings Section -->
+      <div class="settings-section">
+        <h2>Security</h2>
+        <button type="button" @click="showChangePasswordModal = true" :disabled="loading">
+          <span class="material-symbols-outlined sm">lock_reset</span>
+          <span>Change Password</span>
+        </button>
+      </div>
+
+      <!-- Change Password Modal -->
+      <dialog :open="showChangePasswordModal" style="border: none; border-radius: 0.5rem; backdrop-filter: blur(4px);">
+        <article>
+          <header>
+            <h2>Change Password</h2>
+            <button type="button" class="close" @click="showChangePasswordModal = false; resetChangePassword()" aria-label="Close">×</button>
+          </header>
+
+          <div>
+            <label for="current-password">Current Password</label>
+            <input
+              type="password"
+              id="current-password"
+              x-model="changePasswordForm.currentPassword"
+              placeholder="Enter current password"
+              :disabled="changePasswordLoading"
+            />
+          </div>
+
+          <div>
+            <label for="new-pwd">New Password</label>
+            <input
+              type="password"
+              id="new-pwd"
+              x-model="changePasswordForm.newPassword"
+              placeholder="Enter new password (minimum 8 characters)"
+              :disabled="changePasswordLoading"
+              minlength="8"
+            />
+          </div>
+
+          <div>
+            <label for="confirm-pwd">Confirm New Password</label>
+            <input
+              type="password"
+              id="confirm-pwd"
+              x-model="changePasswordForm.confirmPassword"
+              placeholder="Confirm new password"
+              :disabled="changePasswordLoading"
+            />
+          </div>
+
+          <template x-if="changePasswordError">
+            <p style="color: var(--error-color, #d32f2f); font-weight: 500;" x-text="changePasswordError"></p>
+          </template>
+
+          <footer>
+            <button type="button" class="secondary" @click="showChangePasswordModal = false; resetChangePassword()" :disabled="changePasswordLoading">
+              Cancel
+            </button>
+            <button type="button" @click="handleChangePassword()" :disabled="changePasswordLoading || changePasswordForm.newPassword.length < 8 || changePasswordForm.newPassword !== changePasswordForm.confirmPassword" :aria-busy="changePasswordLoading">
+              <span x-text="changePasswordLoading ? 'Changing...' : 'Change Password'"></span>
+            </button>
+          </footer>
+        </article>
+      </dialog>
+
       <!-- Action Buttons -->
       <div class="button-group">
         <button type="button" @click="saveSettings()" :disabled="loading || !hasChanges" style="display: flex; align-items: center; gap: 0.5rem;">
@@ -177,6 +243,14 @@
         loading: false,
         error: '',
         success: '',
+        showChangePasswordModal: false,
+        changePasswordLoading: false,
+        changePasswordError: '',
+        changePasswordForm: {
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: ''
+        },
 
         get hasChanges() {
           // Check if any settings changed
@@ -370,6 +444,66 @@
               console.log('User removed:', removedUser, 'Total users:', this.settings.users);
             }
           });
+        },
+
+        resetChangePassword() {
+          this.changePasswordForm = {
+            currentPassword: '',
+            newPassword: '',
+            confirmPassword: ''
+          };
+          this.changePasswordError = '';
+        },
+
+        async handleChangePassword() {
+          this.changePasswordError = '';
+
+          if (!this.changePasswordForm.currentPassword) {
+            this.changePasswordError = 'Current password is required';
+            return;
+          }
+
+          if (this.changePasswordForm.newPassword.length < 8) {
+            this.changePasswordError = 'New password must be at least 8 characters';
+            return;
+          }
+
+          if (this.changePasswordForm.newPassword !== this.changePasswordForm.confirmPassword) {
+            this.changePasswordError = 'New passwords do not match';
+            return;
+          }
+
+          this.changePasswordLoading = true;
+          try {
+            const response = await fetch('/auth/change-password', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                currentPassword: this.changePasswordForm.currentPassword,
+                newPassword: this.changePasswordForm.newPassword
+              })
+            });
+
+            if (!response.ok) {
+              const data = await response.json().catch(() => ({ error: 'Failed to change password' }));
+              throw new Error(data.error || 'Failed to change password');
+            }
+
+            this.success = 'Password changed successfully';
+            this.showChangePasswordModal = false;
+            this.resetChangePassword();
+
+            // Auto-clear success message after 5 seconds
+            setTimeout(() => {
+              if (this.success === 'Password changed successfully') {
+                this.success = '';
+              }
+            }, 5000);
+          } catch (error) {
+            this.changePasswordError = error.message;
+          } finally {
+            this.changePasswordLoading = false;
+          }
         }
       };
     }
