@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	kservice "github.com/kardianos/service"
+	sysservice "github.com/kardianos/service"
 	"github.com/spf13/cobra"
 
 	"github.com/flippant-heron/wollee/internal/agent"
@@ -21,7 +21,7 @@ type cliOptions struct {
 }
 
 type serviceRuntime struct {
-	service kservice.Service
+	service sysservice.Service
 	program *appservice.Program
 	logger  *appservice.Logger
 }
@@ -72,7 +72,7 @@ func newAgentServiceCommand(action string, opts *cliOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return kservice.Control(runtime.service, action)
+			return sysservice.Control(runtime.service, action)
 		},
 	}
 }
@@ -91,7 +91,7 @@ func buildAgentService(opts cliOptions) (*serviceRuntime, error) {
 		return nil, fmt.Errorf("at least one --upstream must be provided")
 	}
 
-	interactive := kservice.Interactive()
+	interactive := sysservice.Interactive()
 	logger := appservice.NewLogger(interactive)
 	runner := agent.New(agent.Options{
 		Upstreams:        upstreams,
@@ -117,7 +117,7 @@ func buildAgentService(opts cliOptions) (*serviceRuntime, error) {
 		"--initial-heartbeat", opts.initialHeartbeat.String(),
 	)
 
-	svc, err := kservice.New(program, &kservice.Config{
+	svc, err := sysservice.New(program, &sysservice.Config{
 		Name:        "wol-agent",
 		DisplayName: "wol-agent",
 		Description: "Wake-on-LAN heartbeat agent",

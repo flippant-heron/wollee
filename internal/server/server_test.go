@@ -23,9 +23,11 @@ func TestHandleRegisterReturnsHeartbeatInterval(t *testing.T) {
 	}
 
 	cfg := config.ServerConfig{
-		Port:                     8080,
-		SubnetBroadcast:          "192.168.1.255",
-		DefaultHeartbeatInterval: 20 * time.Second,
+		Port:          8080,
+		Network:       "192.168.1.255",
+		Heartbeat:     20 * time.Second,
+		Timeout:       5 * time.Minute,
+		ConfigRefresh: 5 * time.Minute,
 	}
 	cfgMgr := config.NewManager("", cfg)
 
@@ -65,7 +67,7 @@ func TestTelegramListIncludesHosts(t *testing.T) {
 		t.Fatalf("Upsert() error = %v", err)
 	}
 
-	cfg := config.ServerConfig{DefaultHeartbeatInterval: 30 * time.Second}
+	cfg := config.ServerConfig{Heartbeat: 30 * time.Second}
 	cfgMgr := config.NewManager("", cfg)
 
 	app := &App{
@@ -84,10 +86,11 @@ func TestGetSettingsReturnsCurrentConfig(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.ServerConfig{
-		Port:                     8080,
-		SubnetBroadcast:          "192.168.1.0/24",
-		DefaultHeartbeatInterval: 30 * time.Second,
-		ActiveTimeout:            5 * time.Minute,
+		Port:          8080,
+		Network:       "192.168.1.0/24",
+		Heartbeat:     30 * time.Second,
+		Timeout:       5 * time.Minute,
+		ConfigRefresh: 5 * time.Minute,
 	}
 	cfgMgr := config.NewManager("", cfg)
 
@@ -111,11 +114,11 @@ func TestGetSettingsReturnsCurrentConfig(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if payload.SubnetBroadcast != "192.168.1.0/24" {
-		t.Fatalf("SubnetBroadcast = %q, want 192.168.1.0/24", payload.SubnetBroadcast)
+	if payload.Network != "192.168.1.0/24" {
+		t.Fatalf("Network = %q, want 192.168.1.0/24", payload.Network)
 	}
-	if payload.TelegramTokenSet {
-		t.Fatal("TelegramTokenSet = true, want false")
+	if payload.TokenSet {
+		t.Fatal("TokenSet = true, want false")
 	}
 }
 
@@ -128,11 +131,12 @@ func TestUpdateSettingsPreventsTelegramTokenOverwrite(t *testing.T) {
 	// Write initial config with token
 	initialContent := []byte(`server:
   port: 8080
-  subnetBroadcast: 192.168.1.0/24
-  defaultHeartbeatInterval: 30s
-  activeTimeout: 5m
-  telegramToken: existing-token
-  allowedTelegramUsers:
+  network: 192.168.1.0/24
+  heartbeat: 30s
+  timeout: 5m
+  configRefresh: 5m
+  token: existing-token
+  users:
     - 123
 hosts: []
 `)
@@ -160,11 +164,12 @@ hosts: []
 
 	// Try to update token
 	updatePayload := serverSettingsRequest{
-		SubnetBroadcast:          "192.168.2.0/24",
-		DefaultHeartbeatInterval: "30s",
-		ActiveTimeout:            "5m",
-		TelegramToken:            "new-token",
-		AllowedTelegramUsers:     []int64{456},
+		Network:       "192.168.2.0/24",
+		Heartbeat:     "30s",
+		Timeout:       "5m",
+		ConfigRefresh: "5m",
+		Token:         "new-token",
+		Users:         []int64{456},
 	}
 	body, _ := json.Marshal(settingsUpdateRequest{Settings: updatePayload})
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", bytes.NewReader(body))
@@ -178,8 +183,8 @@ hosts: []
 	}
 
 	// Verify token didn't change
-	if mgr := cfgMgr.Get(); mgr.TelegramToken != "existing-token" {
-		t.Fatalf("token changed to %q, want existing-token", mgr.TelegramToken)
+	if mgr := cfgMgr.Get(); mgr.Token != "existing-token" {
+		t.Fatalf("token changed to %q, want existing-token", mgr.Token)
 	}
 }
 
@@ -192,9 +197,10 @@ func TestUpdateSettingsAllowsTokenOnlyOnce(t *testing.T) {
 	// Write initial config without token
 	initialContent := []byte(`server:
   port: 8080
-  subnetBroadcast: 192.168.1.0/24
-  defaultHeartbeatInterval: 30s
-  activeTimeout: 5m
+  network: 192.168.1.0/24
+  heartbeat: 30s
+  timeout: 5m
+  configRefresh: 5m
 hosts: []
 `)
 	if err := os.WriteFile(configPath, initialContent, 0o600); err != nil {
@@ -221,11 +227,12 @@ hosts: []
 
 	// Set token for the first time
 	updatePayload := serverSettingsRequest{
-		SubnetBroadcast:          "192.168.1.0/24",
-		DefaultHeartbeatInterval: "30s",
-		ActiveTimeout:            "5m",
-		TelegramToken:            "new-token",
-		AllowedTelegramUsers:     []int64{123},
+		Network:       "192.168.1.0/24",
+		Heartbeat:     "30s",
+		Timeout:       "5m",
+		ConfigRefresh: "5m",
+		Token:         "new-token",
+		Users:         []int64{123},
 	}
 	body, _ := json.Marshal(settingsUpdateRequest{Settings: updatePayload})
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", bytes.NewReader(body))
@@ -238,7 +245,7 @@ hosts: []
 	}
 
 	// Verify token was set
-	if mgr := cfgMgr.Get(); mgr.TelegramToken != "new-token" {
-		t.Fatalf("token not set: %q", mgr.TelegramToken)
+	if mgr := cfgMgr.Get(); mgr.Token != "new-token" {
+		t.Fatalf("token not set: %q", mgr.Token)
 	}
 }

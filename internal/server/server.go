@@ -15,18 +15,21 @@ import (
 )
 
 type App struct {
-	cfgMgr         *config.Manager
-	logger         *appservice.Logger
-	registry       *Registry
-	httpSrv        *http.Server
-	telegram       *telegram.Service
-	telegramCtx    context.Context
-	telegramCancel context.CancelFunc
-	staticFS       fs.FS
-	indexHTML      []byte
-	addHostHTML    []byte
-	settingsHTML   []byte
-	reloadTicker   *time.Ticker
+	cfgMgr          *config.Manager
+	logger          *appservice.Logger
+	registry        *Registry
+	httpSrv         *http.Server
+	telegram        *telegram.Service
+	telegramCtx     context.Context
+	telegramCancel  context.CancelFunc
+	staticFS        fs.FS
+	indexHTML       []byte
+	addHostHTML     []byte
+	settingsHTML    []byte
+	loginHTML       []byte
+	reloadTicker    *time.Ticker
+	registerLimiter *RateLimiter
+	wakeLimiter     *RateLimiter
 }
 
 type registerRequest struct {
@@ -51,11 +54,13 @@ type hostStatus struct {
 }
 
 type serverSettingsRequest struct {
-	SubnetBroadcast          string  `json:"subnetBroadcast"`
-	DefaultHeartbeatInterval string  `json:"defaultHeartbeatInterval"`
-	ActiveTimeout            string  `json:"activeTimeout"`
-	TelegramToken            string  `json:"telegramToken"`
-	AllowedTelegramUsers     []int64 `json:"allowedTelegramUsers"`
+	Network       string  `json:"network"`
+	Heartbeat     string  `json:"heartbeat"`
+	Timeout       string  `json:"timeout"`
+	ConfigRefresh string  `json:"configRefresh"`
+	Token         string  `json:"token"`
+	Users         []int64 `json:"users"`
+	Whoami        bool    `json:"whoami"`
 }
 
 type settingsUpdateRequest struct {
@@ -63,11 +68,13 @@ type settingsUpdateRequest struct {
 }
 
 type settingsResponse struct {
-	SubnetBroadcast          string  `json:"subnetBroadcast"`
-	DefaultHeartbeatInterval string  `json:"defaultHeartbeatInterval"`
-	ActiveTimeout            string  `json:"activeTimeout"`
-	TelegramTokenSet         bool    `json:"telegramTokenSet"`
-	AllowedTelegramUsers     []int64 `json:"allowedTelegramUsers"`
+	Network       string  `json:"network"`
+	Heartbeat     string  `json:"heartbeat"`
+	Timeout       string  `json:"timeout"`
+	ConfigRefresh string  `json:"configRefresh"`
+	TokenSet      bool    `json:"tokenSet"`
+	Users         []int64 `json:"users"`
+	Whoami        bool    `json:"whoami"`
 }
 
 func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) (*App, error) {
@@ -98,7 +105,19 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 		return nil, fmt.Errorf("read settings.html: %w", err)
 	}
 
-	for _, requiredAsset := range []string{"alpine.min.js", "pico.min.css"} {
+	loginHTML, err := webassets.Assets.ReadFile("login.html")
+	if err != nil {
+		return nil, fmt.Errorf("read login.html: %w", err)
+	}
+
+	requiredAssets := []string{
+		"alpine.min.js",
+		"blades.min.css",
+		"app.css",
+		"material-symbols.css",
+		"material-symbols-outlined.woff2",
+	}
+	for _, requiredAsset := range requiredAssets {
 		if _, err := fs.ReadFile(staticFS, requiredAsset); err != nil {
 			return nil, fmt.Errorf("missing embedded asset %q: run `task assets:dl` before build", requiredAsset)
 		}
@@ -106,16 +125,19 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 
 	cfg := cfgMgr.Get()
 	app := &App{
-		cfgMgr:       cfgMgr,
-		logger:       logger,
-		registry:     registry,
-		staticFS:     staticFS,
-		indexHTML:    indexHTML,
-		addHostHTML:  addHostHTML,
-		settingsHTML: settingsHTML,
+		cfgMgr:          cfgMgr,
+		logger:          logger,
+		registry:        registry,
+		staticFS:        staticFS,
+		indexHTML:       indexHTML,
+		addHostHTML:     addHostHTML,
+		settingsHTML:    settingsHTML,
+		loginHTML:       loginHTML,
+		registerLimiter: NewRateLimiter(60, time.Minute), // 10 registrations per minute per IP
+		wakeLimiter:     NewRateLimiter(30, time.Minute), // 30 wake requests per minute per IP
 	}
 
-	app.telegram = telegram.New(cfg.TelegramToken, cfg.AllowedTelegramUsers, app, logger)
+	app.telegram = telegram.New(cfg.Token, cfg.Users, app, logger, cfg.Whoami)
 	return app, nil
 }
 
@@ -134,7 +156,7 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
-	a.logger.Info("starting server", "port", cfg.Port, "broadcast", cfg.SubnetBroadcast)
+	a.logger.Info("starting server", "port", cfg.Port, "broadcast", cfg.Network)
 
 	// Start periodic config reload (every 300 seconds)
 	a.reloadTicker = time.NewTicker(300 * time.Second)
@@ -170,14 +192,15 @@ func (a *App) reloadConfig() error {
 	newCfg := a.cfgMgr.Get()
 
 	// If telegram settings changed, restart the telegram service
-	if oldCfg.TelegramToken != newCfg.TelegramToken ||
-		!eqInt64Slices(oldCfg.AllowedTelegramUsers, newCfg.AllowedTelegramUsers) {
+	if oldCfg.Token != newCfg.Token ||
+		!eqInt64Slices(oldCfg.Users, newCfg.Users) ||
+		oldCfg.Whoami != newCfg.Whoami {
 		// Stop the old telegram service
 		a.telegramCancel()
 		a.telegram.Shutdown()
 
 		// Create a new telegram service with updated config
-		a.telegram = telegram.New(newCfg.TelegramToken, newCfg.AllowedTelegramUsers, a, a.logger)
+		a.telegram = telegram.New(newCfg.Token, newCfg.Users, a, a.logger, newCfg.Whoami)
 
 		// Create a new context for the telegram service (child of the main context through Run())
 		// We create a new child context since the old one was cancelled

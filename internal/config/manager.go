@@ -80,12 +80,16 @@ func (m *Manager) Update(newConfig ServerConfig) error {
 
 	// Update server section
 	serverConfig := map[string]interface{}{
-		"port":                     newConfig.Port,
-		"subnetBroadcast":          newConfig.SubnetBroadcast,
-		"activeTimeout":            newConfig.ActiveTimeout.String(),
-		"defaultHeartbeatInterval": newConfig.DefaultHeartbeatInterval.String(),
-		"telegramToken":            newConfig.TelegramToken,
-		"allowedTelegramUsers":     newConfig.AllowedTelegramUsers,
+		"port":          newConfig.Port,
+		"network":       newConfig.Network,
+		"timeout":       newConfig.Timeout.String(),
+		"heartbeat":     newConfig.Heartbeat.String(),
+		"configRefresh": newConfig.ConfigRefresh.String(),
+		"token":         newConfig.Token,
+		"users":         newConfig.Users,
+		"whoami":        newConfig.Whoami,
+		"passwordHash":  newConfig.PasswordHash,
+		"jwtSecret":     newConfig.JWTSecret,
 	}
 	config["server"] = serverConfig
 

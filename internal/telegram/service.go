@@ -22,14 +22,15 @@ type Service struct {
 	handler Handler
 	logger  *appservice.Logger
 	bot     *tgbotapi.BotAPI
+	whoami  bool
 }
 
-func New(token string, allowedUsers []int64, handler Handler, logger *appservice.Logger) *Service {
+func New(token string, allowedUsers []int64, handler Handler, logger *appservice.Logger, whoami bool) *Service {
 	allowed := make(map[int64]struct{}, len(allowedUsers))
 	for _, userID := range allowedUsers {
 		allowed[userID] = struct{}{}
 	}
-	return &Service{token: token, allowed: allowed, handler: handler, logger: logger}
+	return &Service{token: token, allowed: allowed, handler: handler, logger: logger, whoami: whoami}
 }
 
 func (s *Service) Enabled() bool {
@@ -79,8 +80,19 @@ func (s *Service) handleMessage(message *tgbotapi.Message) {
 		return
 	}
 
-	// Allow /whoami for anyone to discover their user ID
+	// Handle /whoami command with bootstrap logic
 	if strings.ToLower(message.Command()) == "whoami" {
+		// Allow /whoami for:
+		// 1. Whitelisted users (always)
+		// 2. Anyone if in bootstrap mode (no users whitelisted yet)
+		// 3. Anyone if whoami is enabled (public discovery mode)
+		_, isWhitelisted := s.allowed[message.From.ID]
+		isBootstrapMode := len(s.allowed) == 0
+
+		if !isWhitelisted && !isBootstrapMode && !s.whoami {
+			s.reply(message.Chat.ID, "unauthorized")
+			return
+		}
 		s.reply(message.Chat.ID, fmt.Sprintf("Your Telegram user ID is: %d", message.From.ID))
 		return
 	}

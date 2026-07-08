@@ -18,6 +18,7 @@ type HostRecord struct {
 	Hostname string    `json:"hostname" yaml:"hostname"`
 	IP       string    `json:"ip" yaml:"ip"`
 	LastSeen time.Time `json:"lastSeen" yaml:"lastSeen"`
+	Disabled bool      `json:"disabled" yaml:"disabled"`
 }
 
 type hostRegistryFile struct {

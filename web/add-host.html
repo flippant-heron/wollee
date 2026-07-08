@@ -4,14 +4,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Add Host - wollee</title>
-  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/blades.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/material-symbols.css">
   <script defer src="/static/alpine.min.js"></script>
+  <script src="/static/common.js"></script>
 </head>
 <body>
-  <main class="container" x-data="addHostApp()" x-init="init()">
-    <nav>
+  <main class="container" x-data="addHostApp()" x-init="$store.theme.init(); init()">
+    <nav x-data="{ navOpen: false }">
       <ul><li><strong>wollee</strong></li></ul>
-      <ul><li><a href="/">Back to Hosts</a></li></ul>
+      <button type="button" class="nav-toggle" @click="navOpen = !navOpen" title="Toggle menu">
+        <span class="material-symbols-outlined sm">menu</span>
+      </button>
+      <ul :class="{ active: navOpen }">
+        <li><button type="button" @click="navigateBack()" title="Back to home">
+          <span class="material-symbols-outlined sm">arrow_back</span>
+        </button></li>
+        <li><button type="button" @click="$store.theme.toggle()" title="Toggle dark mode">
+          <span class="material-symbols-outlined sm" x-text="$store.theme.dark ? 'light_mode' : 'dark_mode'"></span>
+        </button></li>
+      </ul>
     </nav>
 
     <article>
@@ -41,9 +54,15 @@
           <label for="ip">IP address</label>
           <input id="ip" type="text" x-model="form.ip" placeholder="e.g., 192.168.1.100" required>
         </div>
-        <div>
-          <button type="submit" :disabled="loading">Add Host</button>
-          <a href="/" role="button" class="secondary">Cancel</a>
+        <div style="display: flex; gap: 1rem;">
+          <button type="submit" :disabled="loading" style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="material-symbols-outlined sm">add_circle</span>
+            <span>Add Host</span>
+          </button>
+          <button type="button" @click="navigateBack()" style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="material-symbols-outlined sm">cancel</span>
+            <span>Cancel</span>
+          </button>
         </div>
       </form>
     </article>
@@ -58,6 +77,9 @@
         success: false,
         init() {
           // Form is ready
+        },
+        navigateBack() {
+          window.location.href = '/';
         },
         async addHost() {
           this.error = '';

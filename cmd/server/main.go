@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	kservice "github.com/kardianos/service"
+	sysservice "github.com/kardianos/service"
 	"github.com/spf13/cobra"
 
 	"github.com/flippant-heron/wollee/internal/config"
@@ -15,7 +15,7 @@ import (
 )
 
 type serverRuntime struct {
-	service kservice.Service
+	service sysservice.Service
 	program *appservice.Program
 	logger  *appservice.Logger
 }
@@ -62,7 +62,7 @@ func newServerServiceCommand(action string, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return kservice.Control(runtime.service, action)
+			return sysservice.Control(runtime.service, action)
 		},
 	}
 }
@@ -97,12 +97,12 @@ func buildServerService(configPath string) (*serverRuntime, error) {
 		return nil, err
 	}
 
-	interactive := kservice.Interactive()
+	interactive := sysservice.Interactive()
 	logger := appservice.NewLogger(interactive)
-	
+
 	// Create config manager for hot-reload
 	cfgMgr := config.NewManager(cfg.SourcePath, cfg.Server)
-	
+
 	runner, err := server.New(cfgMgr, registry, logger)
 	if err != nil {
 		return nil, err
@@ -114,7 +114,7 @@ func buildServerService(configPath string) (*serverRuntime, error) {
 		return nil, err
 	}
 
-	svc, err := kservice.New(program, &kservice.Config{
+	svc, err := sysservice.New(program, &sysservice.Config{
 		Name:        "wol-server",
 		DisplayName: "wol-server",
 		Description: "Wake-on-LAN registry server",
