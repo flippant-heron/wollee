@@ -1,8 +1,11 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -28,6 +31,8 @@ type ServerConfig struct {
 	Token         string
 	Users         []int64
 	Whoami        bool
+	PasswordHash  string
+	JWTSecret     string
 }
 
 type HostConfig struct {
@@ -49,6 +54,8 @@ type rawServerConfig struct {
 	Token         string  `mapstructure:"token"`
 	Users         []int64 `mapstructure:"users"`
 	Whoami        bool    `mapstructure:"whoami"`
+	PasswordHash  string  `mapstructure:"passwordHash"`
+	JWTSecret     string  `mapstructure:"jwtSecret"`
 }
 
 func DefaultPath() string {
@@ -68,6 +75,14 @@ func Load(path string) (Config, error) {
 	v.SetDefault("server.timeout", "5m")
 	v.SetDefault("server.configRefresh", "5m")
 	v.SetDefault("server.whoami", false)
+
+	// Bind environment variables for sensitive config
+	if err := v.BindEnv("server.jwtSecret", "WOLLEE_JWT_SECRET"); err != nil {
+		return Config{}, fmt.Errorf("bind env server.jwtSecret: %w", err)
+	}
+	if err := v.BindEnv("server.passwordHash", "WOLLEE_PASSWORD_HASH"); err != nil {
+		return Config{}, fmt.Errorf("bind env server.passwordHash: %w", err)
+	}
 
 	if err := v.ReadInConfig(); err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
@@ -104,6 +119,8 @@ func Load(path string) (Config, error) {
 			Token:         raw.Server.Token,
 			Users:         raw.Server.Users,
 			Whoami:        raw.Server.Whoami,
+			PasswordHash:  raw.Server.PasswordHash,
+			JWTSecret:     getOrGenerateJWTSecret(raw.Server.JWTSecret),
 		},
 		Hosts: raw.Hosts,
 	}, nil
@@ -153,4 +170,25 @@ func (c *Config) ValidateServer() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// getOrGenerateJWTSecret returns the provided secret or generates a new one if empty
+func getOrGenerateJWTSecret(secret string) string {
+	if secret != "" {
+		return secret
+	}
+
+	// Try to get from environment variable
+	if envSecret := os.Getenv("WOLLEE_JWT_SECRET"); envSecret != "" {
+		return envSecret
+	}
+
+	// Generate a new random 32-byte secret
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		// Fallback to a static secret if generation fails (shouldn't happen)
+		return "wollee-generated-secret-fallback"
+	}
+
+	return base64.StdEncoding.EncodeToString(randomBytes)
 }

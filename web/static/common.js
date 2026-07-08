@@ -84,3 +84,46 @@ document.addEventListener('alpine:init', () => {
     }
   });
 });
+
+// Auth utilities
+const authUtils = {
+  // Check if user is authenticated by trying to access a protected resource
+  async isAuthenticated() {
+    try {
+      const response = await fetch('/status', { method: 'GET' });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  // Logout and redirect to login page
+  async logout() {
+    try {
+      await fetch('/auth/logout', { method: 'POST' });
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Logout failed:', error);
+      window.location.href = '/';
+    }
+  },
+
+  // Check auth on page load and redirect if needed
+  async checkAuthOnLoad() {
+    const isAuth = await this.isAuthenticated();
+    if (!isAuth && window.location.pathname !== '/' && !window.location.pathname.includes('/auth/')) {
+      window.location.href = '/';
+    }
+  }
+};
+
+// Auto-check auth on page load for protected pages
+if (window.location.pathname !== '/' && !window.location.pathname.includes('/auth/')) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      authUtils.checkAuthOnLoad();
+    });
+  } else {
+    authUtils.checkAuthOnLoad();
+  }
+}

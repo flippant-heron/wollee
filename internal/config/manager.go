@@ -88,6 +88,8 @@ func (m *Manager) Update(newConfig ServerConfig) error {
 		"token":         newConfig.Token,
 		"users":         newConfig.Users,
 		"whoami":        newConfig.Whoami,
+		"passwordHash":  newConfig.PasswordHash,
+		"jwtSecret":     newConfig.JWTSecret,
 	}
 	config["server"] = serverConfig
 
