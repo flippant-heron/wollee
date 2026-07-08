@@ -2,6 +2,7 @@ config.yaml
 web/static/*
 !web/static/README.txt
 !web/static/common.js
+!web/static/app.css
 *.ignore
 **/*.ignore/*
 
