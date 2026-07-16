@@ -1,6 +1,6 @@
 module github.com/flippant-heron/wollee
 
-go 1.25.0
+go 1.25.12
 
 require (
 	github.com/ahiggins0/go-wol v0.0.1
