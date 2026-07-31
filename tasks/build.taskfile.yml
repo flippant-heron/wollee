@@ -8,17 +8,24 @@ includes:
   assets: ./assets.taskfile.yml
 
 tasks:
+  templ:generate:
+    desc: Generate Go code from Templ templates
+    cmds:
+      - go run github.com/a-h/templ/cmd/templ@latest generate
+
   _check-assets:
     internal: true
     desc: Ensure assets are present before build
     status:
-      - test -f web/static/alpine.min.js && test -f web/static/blades.min.css && test -f web/static/material-symbols-outlined.woff2 && test -f web/static/material-symbols.css
+      - test -f web/static/alpine.min.js && test -f web/static/htmx.min.js && test -f web/static/blades.min.css && test -f web/static/material-symbols-outlined.woff2 && test -f web/static/material-symbols.css
     cmds:
       - task: assets:get
 
   _build:
     internal: true
     desc: Internal task to build a binary for a given platform
+    deps:
+      - templ:generate
     requires:
       vars: [GOOS, GOARCH, CMD, OUTPUT]
     cmds:

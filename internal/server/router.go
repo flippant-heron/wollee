@@ -121,6 +121,7 @@ func (a *App) createMux() *http.ServeMux {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(a.staticFS))))
 	mux.Handle("/wake", a.RateLimitMiddleware(a.wakeLimiter)(http.HandlerFunc(a.handleWake)))
 	mux.HandleFunc("/status", a.handleStatus)
+	mux.HandleFunc("/status/table", a.handleStatusTable)
 	mux.HandleFunc("/config/reload", a.handleConfigReload)
 	mux.HandleFunc("/hosts", a.handleAddHost)
 	mux.HandleFunc("DELETE /hosts/{mac}", a.handleDeleteHost)

@@ -249,3 +249,76 @@ hosts: []
 		t.Fatalf("token not set: %q", mgr.Token)
 	}
 }
+
+func TestStatusTableReturnsHTMLFragment(t *testing.T) {
+	t.Parallel()
+
+	registry, err := OpenRegistry(filepath.Join(t.TempDir(), "hosts.yaml"))
+	if err != nil {
+		t.Fatalf("OpenRegistry() error = %v", err)
+	}
+
+	// Add test hosts
+	if err := registry.Upsert(HostRecord{
+		MAC:      "00:11:22:33:44:55",
+		Hostname: "desk",
+		IP:       "192.168.1.10",
+		LastSeen: time.Now().Add(-1 * time.Minute),
+	}); err != nil {
+		t.Fatalf("Upsert desk: %v", err)
+	}
+
+	if err := registry.Upsert(HostRecord{
+		MAC:      "aa:bb:cc:dd:ee:ff",
+		Hostname: "server",
+		IP:       "192.168.1.20",
+		LastSeen: time.Now().Add(-10 * time.Minute),
+		Disabled: true,
+	}); err != nil {
+		t.Fatalf("Upsert server: %v", err)
+	}
+
+	cfg := config.ServerConfig{
+		Timeout: 5 * time.Minute,
+	}
+	cfgMgr := config.NewManager("", cfg)
+
+	app := &App{
+		cfgMgr:   cfgMgr,
+		registry: registry,
+		logger:   appservice.NewLogger(true),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/status/table", nil)
+	resp := httptest.NewRecorder()
+
+	app.handleStatusTable(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusOK)
+	}
+
+	contentType := resp.Header().Get("Content-Type")
+	if contentType != "text/html; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want text/html; charset=utf-8", contentType)
+	}
+
+	body := resp.Body.String()
+
+	// Verify HTML structure and host data
+	if !bytes.Contains([]byte(body), []byte("<tr")) {
+		t.Fatal("response missing <tr> elements")
+	}
+	if !bytes.Contains([]byte(body), []byte("desk")) {
+		t.Fatal("response missing hostname 'desk'")
+	}
+	if !bytes.Contains([]byte(body), []byte("00:11:22:33:44:55")) {
+		t.Fatal("response missing MAC '00:11:22:33:44:55'")
+	}
+	if !bytes.Contains([]byte(body), []byte("server")) {
+		t.Fatal("response missing hostname 'server'")
+	}
+	if !bytes.Contains([]byte(body), []byte("disabled")) {
+		t.Fatal("response missing 'disabled' class for disabled host")
+	}
+}

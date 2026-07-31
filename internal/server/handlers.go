@@ -11,12 +11,39 @@ import (
 	"strings"
 	"time"
 
+	"github.com/a-h/templ"
 	"github.com/flippant-heron/wollee/internal/auth"
+	"github.com/flippant-heron/wollee/internal/server/templates"
 	"github.com/flippant-heron/wollee/internal/telegram"
 	internalwol "github.com/flippant-heron/wollee/internal/wol"
 )
 
 var errHostNotFound = errors.New("host not found")
+
+// renderHTML renders a templ component to the response writer
+func renderHTML(w http.ResponseWriter, component templ.Component) error {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	return component.Render(context.Background(), w)
+}
+
+// getHostStatuses converts registry hosts to template HostStatus objects
+func (a *App) getHostStatuses() []templates.HostStatus {
+	cfg := a.cfgMgr.Get()
+	records := a.registry.List()
+	hosts := make([]templates.HostStatus, 0, len(records))
+	cutoff := time.Now().Add(-cfg.Timeout)
+	for _, host := range records {
+		hosts = append(hosts, templates.HostStatus{
+			MAC:      host.MAC,
+			Hostname: host.Hostname,
+			IP:       host.IP,
+			LastSeen: host.LastSeen,
+			Disabled: host.Disabled,
+			Active:   host.LastSeen.After(cutoff),
+		})
+	}
+	return hosts
+}
 
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -96,9 +123,16 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isHTMX := r.Header.Get("HX-Request") == "true"
+
 	var req wakeRequest
 	if err := a.decodeJSON(r, &req); err != nil {
-		a.writeError(w, http.StatusBadRequest, err.Error())
+		if isHTMX {
+			w.WriteHeader(http.StatusBadRequest)
+			renderHTML(w, templates.ErrorRow(err.Error()))
+		} else {
+			a.writeError(w, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 
@@ -108,24 +142,46 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errHostNotFound) {
 			status = http.StatusNotFound
 		}
-		a.writeError(w, status, err.Error())
+		if isHTMX {
+			w.WriteHeader(status)
+			renderHTML(w, templates.ErrorRow(err.Error()))
+		} else {
+			a.writeError(w, status, err.Error())
+		}
 		return
 	}
 
 	if host.Disabled {
-		a.writeError(w, http.StatusForbidden, "host is disabled")
+		if isHTMX {
+			w.WriteHeader(http.StatusForbidden)
+			renderHTML(w, templates.ErrorRow("Host is disabled"))
+		} else {
+			a.writeError(w, http.StatusForbidden, "host is disabled")
+		}
 		return
 	}
 
 	cfg := a.cfgMgr.Get()
 	if err := internalwol.SendMagicPacket(host.MAC, cfg.Network); err != nil {
 		a.logger.Error("send magic packet", err, "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
-		a.writeError(w, http.StatusBadGateway, "failed to send magic packet")
+		if isHTMX {
+			w.WriteHeader(http.StatusBadGateway)
+			renderHTML(w, templates.ErrorRow("Failed to send magic packet"))
+		} else {
+			a.writeError(w, http.StatusBadGateway, "failed to send magic packet")
+		}
 		return
 	}
 
 	a.logger.Info("sent magic packet", "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
-	a.writeJSON(w, http.StatusOK, hostStatus{HostRecord: host, Active: host.LastSeen.After(time.Now().Add(-cfg.Timeout))})
+
+	if isHTMX {
+		// Return updated table for HTMX
+		hosts := a.getHostStatuses()
+		renderHTML(w, templates.StatusTableRows(hosts))
+	} else {
+		a.writeJSON(w, http.StatusOK, hostStatus{HostRecord: host, Active: host.LastSeen.After(time.Now().Add(-cfg.Timeout))})
+	}
 }
 
 func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -283,33 +339,62 @@ func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isHTMX := r.Header.Get("HX-Request") == "true"
+
 	// Extract MAC from path: /hosts/{mac}
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		a.writeError(w, http.StatusBadRequest, "MAC address is required")
+		if isHTMX {
+			w.WriteHeader(http.StatusBadRequest)
+			renderHTML(w, templates.ErrorRow("MAC address is required"))
+		} else {
+			a.writeError(w, http.StatusBadRequest, "MAC address is required")
+		}
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		if isHTMX {
+			w.WriteHeader(http.StatusBadRequest)
+			renderHTML(w, templates.ErrorRow("Invalid MAC address"))
+		} else {
+			a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		}
 		return
 	}
 
 	// Check host exists before deleting
 	if _, ok := a.registry.FindByMAC(normalized); !ok {
-		a.writeError(w, http.StatusNotFound, "host not found")
+		if isHTMX {
+			w.WriteHeader(http.StatusNotFound)
+			renderHTML(w, templates.ErrorRow("Host not found"))
+		} else {
+			a.writeError(w, http.StatusNotFound, "host not found")
+		}
 		return
 	}
 
 	if err := a.registry.Delete(normalized); err != nil {
 		a.logger.Error("delete host", err, "mac", normalized)
-		a.writeError(w, http.StatusInternalServerError, "failed to delete host")
+		if isHTMX {
+			w.WriteHeader(http.StatusInternalServerError)
+			renderHTML(w, templates.ErrorRow("Failed to delete host"))
+		} else {
+			a.writeError(w, http.StatusInternalServerError, "failed to delete host")
+		}
 		return
 	}
 
 	a.logger.Info("deleted host", "mac", normalized)
-	a.writeJSON(w, http.StatusOK, map[string]string{"message": "host deleted"})
+
+	if isHTMX {
+		// Return updated table for HTMX
+		hosts := a.getHostStatuses()
+		renderHTML(w, templates.StatusTableRows(hosts))
+	} else {
+		a.writeJSON(w, http.StatusOK, map[string]string{"message": "host deleted"})
+	}
 }
 
 func (a *App) handleDisableHost(w http.ResponseWriter, r *http.Request) {
@@ -318,38 +403,73 @@ func (a *App) handleDisableHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isHTMX := r.Header.Get("HX-Request") == "true"
+
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		a.writeError(w, http.StatusBadRequest, "MAC address is required")
+		if isHTMX {
+			w.WriteHeader(http.StatusBadRequest)
+			renderHTML(w, templates.ErrorRow("MAC address is required"))
+		} else {
+			a.writeError(w, http.StatusBadRequest, "MAC address is required")
+		}
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		if isHTMX {
+			w.WriteHeader(http.StatusBadRequest)
+			renderHTML(w, templates.ErrorRow("Invalid MAC address"))
+		} else {
+			a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		}
 		return
 	}
 
 	host, ok := a.registry.FindByMAC(normalized)
 	if !ok {
-		a.writeError(w, http.StatusNotFound, "host not found")
+		if isHTMX {
+			w.WriteHeader(http.StatusNotFound)
+			renderHTML(w, templates.ErrorRow("Host not found"))
+		} else {
+			a.writeError(w, http.StatusNotFound, "host not found")
+		}
 		return
 	}
 
 	if host.Disabled {
-		a.writeError(w, http.StatusConflict, "host is already disabled")
+		if isHTMX {
+			w.WriteHeader(http.StatusConflict)
+			hosts := a.getHostStatuses()
+			renderHTML(w, templates.StatusTableRows(hosts))
+		} else {
+			a.writeError(w, http.StatusConflict, "host is already disabled")
+		}
 		return
 	}
 
 	host.Disabled = true
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("disable host", err, "mac", normalized)
-		a.writeError(w, http.StatusInternalServerError, "failed to disable host")
+		if isHTMX {
+			w.WriteHeader(http.StatusInternalServerError)
+			renderHTML(w, templates.ErrorRow("Failed to disable host"))
+		} else {
+			a.writeError(w, http.StatusInternalServerError, "failed to disable host")
+		}
 		return
 	}
 
 	a.logger.Info("disabled host", "mac", normalized)
-	a.writeJSON(w, http.StatusOK, host)
+
+	if isHTMX {
+		// Return updated table for HTMX
+		hosts := a.getHostStatuses()
+		renderHTML(w, templates.StatusTableRows(hosts))
+	} else {
+		a.writeJSON(w, http.StatusOK, host)
+	}
 }
 
 func (a *App) handleEnableHost(w http.ResponseWriter, r *http.Request) {
@@ -358,38 +478,73 @@ func (a *App) handleEnableHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isHTMX := r.Header.Get("HX-Request") == "true"
+
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		a.writeError(w, http.StatusBadRequest, "MAC address is required")
+		if isHTMX {
+			w.WriteHeader(http.StatusBadRequest)
+			renderHTML(w, templates.ErrorRow("MAC address is required"))
+		} else {
+			a.writeError(w, http.StatusBadRequest, "MAC address is required")
+		}
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		if isHTMX {
+			w.WriteHeader(http.StatusBadRequest)
+			renderHTML(w, templates.ErrorRow("Invalid MAC address"))
+		} else {
+			a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		}
 		return
 	}
 
 	host, ok := a.registry.FindByMAC(normalized)
 	if !ok {
-		a.writeError(w, http.StatusNotFound, "host not found")
+		if isHTMX {
+			w.WriteHeader(http.StatusNotFound)
+			renderHTML(w, templates.ErrorRow("Host not found"))
+		} else {
+			a.writeError(w, http.StatusNotFound, "host not found")
+		}
 		return
 	}
 
 	if !host.Disabled {
-		a.writeError(w, http.StatusConflict, "host is already enabled")
+		if isHTMX {
+			w.WriteHeader(http.StatusConflict)
+			hosts := a.getHostStatuses()
+			renderHTML(w, templates.StatusTableRows(hosts))
+		} else {
+			a.writeError(w, http.StatusConflict, "host is already enabled")
+		}
 		return
 	}
 
 	host.Disabled = false
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("enable host", err, "mac", normalized)
-		a.writeError(w, http.StatusInternalServerError, "failed to enable host")
+		if isHTMX {
+			w.WriteHeader(http.StatusInternalServerError)
+			renderHTML(w, templates.ErrorRow("Failed to enable host"))
+		} else {
+			a.writeError(w, http.StatusInternalServerError, "failed to enable host")
+		}
 		return
 	}
 
 	a.logger.Info("enabled host", "mac", normalized)
-	a.writeJSON(w, http.StatusOK, host)
+
+	if isHTMX {
+		// Return updated table for HTMX
+		hosts := a.getHostStatuses()
+		renderHTML(w, templates.StatusTableRows(hosts))
+	} else {
+		a.writeJSON(w, http.StatusOK, host)
+	}
 }
 
 func (a *App) handleConfigReload(w http.ResponseWriter, r *http.Request) {
@@ -866,4 +1021,14 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, changePasswordResponse{
 		Message: "password changed successfully",
 	})
+}
+
+func (a *App) handleStatusTable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	hosts := a.getHostStatuses()
+	renderHTML(w, templates.StatusTableRows(hosts))
 }
