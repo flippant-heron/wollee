@@ -55,3 +55,8 @@ tasks:
     desc: Alias for build:all - build all cross-platform release artifacts
     cmds:
       - task: build:all
+
+  run:
+    desc: Run the application server
+    cmds:
+      - go run {{.ROOT_DIR}}/cmd/server

@@ -22,4 +22,5 @@ tasks:
         tar -xzf material-symbols-{{.MATERIAL_SYMBOLS_VERSION}}.tgz -C material-symbols &&
         cp alpinejs/package/dist/cdn.min.js {{.ROOT_DIR}}/{{.WEB_STATIC}}/alpine.min.js &&
         cp blades/package/assets/blades.css {{.ROOT_DIR}}/{{.WEB_STATIC}}/blades.min.css &&
+        cp material-symbols/package/outlined.css {{.ROOT_DIR}}/{{.WEB_STATIC}}/material-symbols.css &&
         cp material-symbols/package/material-symbols-outlined.woff2 {{.ROOT_DIR}}/{{.WEB_STATIC}}/material-symbols-outlined.woff2

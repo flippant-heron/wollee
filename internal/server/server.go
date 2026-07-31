@@ -119,7 +119,7 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 	}
 	for _, requiredAsset := range requiredAssets {
 		if _, err := fs.ReadFile(staticFS, requiredAsset); err != nil {
-			return nil, fmt.Errorf("missing embedded asset %q: run `task assets:dl` before build", requiredAsset)
+			return nil, fmt.Errorf("missing embedded asset %q: run `task assets:get` before build", requiredAsset)
 		}
 	}
 
