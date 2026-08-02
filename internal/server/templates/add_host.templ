@@ -1,0 +1,65 @@
+package templates
+
+templ AddHostPage() {
+	<header>
+		<h1>Add new host</h1>
+		<p>Register a new Wake-on-LAN host.</p>
+	</header>
+
+	<div id="form-result"></div>
+
+	@AddHostForm("")
+}
+
+templ AddHostForm(errorMsg string) {
+	<form hx-post="/add-host" hx-target="this" hx-swap="outerHTML">
+		if errorMsg != "" {
+			<div class="error-message" style="margin-bottom: 1rem;">
+				<strong>Error:</strong> { errorMsg }
+			</div>
+		}
+		
+		<div>
+			<label for="hostname">Hostname</label>
+			<input id="hostname" type="text" name="hostname" placeholder="e.g., desktop-1" required>
+		</div>
+		
+		<div>
+			<label for="mac">MAC Address</label>
+			<input id="mac" type="text" name="mac" placeholder="e.g., 00:11:22:33:44:55" required>
+		</div>
+		
+		<div>
+			<label for="ip">IP Address</label>
+			<input id="ip" type="text" name="ip" placeholder="e.g., 192.168.1.100" required>
+		</div>
+		
+		<div style="display: flex; gap: 1rem;">
+			<button type="submit">
+				<span class="material-symbols-outlined sm">add_circle</span>
+				Add Host
+			</button>
+			<button type="button" hx-get="/" hx-target="#article-content" hx-swap="innerHTML" style="background-color: var(--button-secondary, #e0e0e0);">
+				<span class="material-symbols-outlined sm">cancel</span>
+				Cancel
+			</button>
+		</div>
+	</form>
+}
+
+templ AddHostSuccess(hostname string) {
+	<div id="form-result">
+		<div class="success-message" style="margin-bottom: 1rem;">
+			<strong>Success!</strong> Host "{ hostname }" added successfully.
+		</div>
+		<script>
+			showToast('Host added successfully', 2000, 'success');
+		</script>
+	</div>
+}
+
+templ AddHostError(message string) {
+	<div id="form-result">
+		@AddHostForm(message)
+	</div>
+}

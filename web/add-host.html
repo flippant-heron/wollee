@@ -12,18 +12,18 @@
   <script src="/static/common.js"></script>
 </head>
 <body>
-  <main class="container" x-data="addHostApp()" x-init="$store.theme.init(); init()">
-    <nav x-data="{ navOpen: false }">
+  <main class="container">
+    <nav>
       <ul><li><strong>wollee</strong></li></ul>
-      <button type="button" class="nav-toggle" @click="navOpen = !navOpen" title="Toggle menu">
+      <button type="button" class="nav-toggle" onclick="document.querySelector('nav ul:last-child').classList.toggle('active')" title="Toggle menu">
         <span class="material-symbols-outlined sm">menu</span>
       </button>
-      <ul :class="{ active: navOpen }">
-        <li><button type="button" @click="navigateBack()" title="Back to home">
+      <ul>
+        <li><button type="button" onclick="window.location.href = '/'" title="Back to home">
           <span class="material-symbols-outlined sm">arrow_back</span>
         </button></li>
-        <li><button type="button" @click="$store.theme.toggle()" title="Toggle dark mode">
-          <span class="material-symbols-outlined sm" x-text="$store.theme.dark ? 'light_mode' : 'dark_mode'"></span>
+        <li><button type="button" onclick="toggleTheme()" title="Toggle dark mode">
+          <span class="material-symbols-outlined sm">dark_mode</span>
         </button></li>
       </ul>
     </nav>
@@ -34,33 +34,27 @@
         <p>Register a new Wake-on-LAN host.</p>
       </header>
 
-      <template x-if="error">
-        <p><mark x-text="error"></mark></p>
-      </template>
+      <div id="form-result"></div>
 
-      <template x-if="success">
-        <p style="color: green;">Host added successfully. Redirecting...</p>
-      </template>
-
-      <form @submit.prevent="addHost()" v-if="!success">
+      <form hx-post="/add-host" hx-target="#form-result" hx-swap="innerHTML">
         <div>
           <label for="hostname">Hostname</label>
-          <input id="hostname" type="text" x-model="form.hostname" placeholder="e.g., desktop-1" required>
+          <input id="hostname" type="text" name="hostname" placeholder="e.g., desktop-1">
         </div>
         <div>
           <label for="mac">MAC address</label>
-          <input id="mac" type="text" x-model="form.mac" placeholder="e.g., 00:11:22:33:44:55" required>
+          <input id="mac" type="text" name="mac" placeholder="e.g., 00:11:22:33:44:55" required>
         </div>
         <div>
           <label for="ip">IP address</label>
-          <input id="ip" type="text" x-model="form.ip" placeholder="e.g., 192.168.1.100" required>
+          <input id="ip" type="text" name="ip" placeholder="e.g., 192.168.1.100" required>
         </div>
         <div style="display: flex; gap: 1rem;">
-          <button type="submit" :disabled="loading" style="display: flex; align-items: center; gap: 0.5rem;">
+          <button type="submit" style="display: flex; align-items: center; gap: 0.5rem;">
             <span class="material-symbols-outlined sm">add_circle</span>
             <span>Add Host</span>
           </button>
-          <button type="button" @click="navigateBack()" style="display: flex; align-items: center; gap: 0.5rem;">
+          <button type="button" hx-get="/" hx-boost="true" style="display: flex; align-items: center; gap: 0.5rem;">
             <span class="material-symbols-outlined sm">cancel</span>
             <span>Cancel</span>
           </button>
@@ -68,48 +62,5 @@
       </form>
     </article>
   </main>
-
-  <script>
-    function addHostApp() {
-      return {
-        form: { hostname: '', mac: '', ip: '' },
-        loading: false,
-        error: '',
-        success: false,
-        init() {
-          // Form is ready
-        },
-        navigateBack() {
-          window.location.href = '/';
-        },
-        async addHost() {
-          this.error = '';
-          try {
-            if (!this.form.hostname || !this.form.mac || !this.form.ip) {
-              throw new Error('All fields are required');
-            }
-            this.loading = true;
-            const response = await fetch('/hosts', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(this.form)
-            });
-            if (!response.ok) {
-              const payload = await response.json().catch(() => ({ error: 'add host request failed' }));
-              throw new Error(payload.error || `add host request failed: ${response.status}`);
-            }
-            this.success = true;
-            setTimeout(() => {
-              window.location.href = '/';
-            }, 1000);
-          } catch (error) {
-            this.error = error.message;
-          } finally {
-            this.loading = false;
-          }
-        }
-      };
-    }
-  </script>
 </body>
 </html>

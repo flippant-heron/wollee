@@ -111,23 +111,23 @@ func (a *App) createMux() *http.ServeMux {
 	// Protected auth endpoints
 	mux.HandleFunc("/auth/change-password", a.handleChangePassword)
 
-	// Rate-limited public endpoints (agent heartbeat)
-	mux.Handle("/register", a.RateLimitMiddleware(a.registerLimiter)(http.HandlerFunc(a.handleRegister)))
-
 	// Protected endpoints (auth required)
 	mux.HandleFunc("/", a.handleIndex)
 	mux.HandleFunc("/add-host", a.handleAddHostPage)
-	mux.HandleFunc("/settings", a.handleSettingsPage)
+	mux.HandleFunc("GET /settings", a.handleSettingsPage)
+	mux.HandleFunc("POST /settings", a.handleUpdateSettingsForm)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(a.staticFS))))
 	mux.Handle("/wake", a.RateLimitMiddleware(a.wakeLimiter)(http.HandlerFunc(a.handleWake)))
-	mux.HandleFunc("/status", a.handleStatus)
 	mux.HandleFunc("/status/table", a.handleStatusTable)
 	mux.HandleFunc("/config/reload", a.handleConfigReload)
-	mux.HandleFunc("/hosts", a.handleAddHost)
+	mux.HandleFunc("POST /add-host", a.handleAddHost)
 	mux.HandleFunc("DELETE /hosts/{mac}", a.handleDeleteHost)
 	mux.HandleFunc("PATCH /hosts/{mac}/disable", a.handleDisableHost)
 	mux.HandleFunc("PATCH /hosts/{mac}/enable", a.handleEnableHost)
-	mux.HandleFunc("/api/settings", a.handleSettings)
+
+	// JSON API endpoints
+	mux.HandleFunc("GET /api/settings", a.getSettings)
+	mux.HandleFunc("POST /api/settings", a.updateSettings)
 
 	return mux
 }

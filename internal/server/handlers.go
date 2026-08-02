@@ -51,6 +51,13 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If this is an HTMX request, return just the article content
+	if r.Header.Get("HX-Request") == "true" {
+		renderHTML(w, templates.HomePage())
+		return
+	}
+
+	// Otherwise, return the full page
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if _, err := w.Write(a.indexHTML); err != nil {
 		a.logger.Error("write index response", err)
@@ -63,58 +70,7 @@ func (a *App) handleAddHostPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := w.Write(a.addHostHTML); err != nil {
-		a.logger.Error("write add-host response", err)
-	}
-}
-
-func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	var req registerRequest
-	if err := a.decodeJSON(r, &req); err != nil {
-		a.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	mac, err := internalwol.NormalizeMAC(req.MAC)
-	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
-		return
-	}
-	if req.Hostname == "" {
-		req.Hostname = mac
-	}
-
-	ip := net.ParseIP(req.IP)
-	if ip == nil || ip.To4() == nil {
-		a.writeError(w, http.StatusBadRequest, "invalid IPv4 address")
-		return
-	}
-
-	host := HostRecord{
-		MAC:      mac,
-		Hostname: strings.TrimSpace(req.Hostname),
-		IP:       ip.String(),
-		LastSeen: time.Unix(0, 0),
-	}
-	if err := a.registry.Upsert(host); err != nil {
-		a.logger.Error("persist host registration", err, "mac", mac)
-		a.writeError(w, http.StatusInternalServerError, "failed to store host")
-		return
-	}
-
-	a.logger.Info("registered host", "mac", host.MAC, "hostname", host.Hostname, "ip", host.IP)
-	cfg := a.cfgMgr.Get()
-	a.writeJSON(w, http.StatusOK, hostStatus{
-		HostRecord:        host,
-		Active:            false,
-		HeartbeatInterval: cfg.Heartbeat.String(),
-	})
+	renderHTML(w, templates.AddHostPage())
 }
 
 func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
@@ -123,81 +79,51 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isHTMX := r.Header.Get("HX-Request") == "true"
-
-	var req wakeRequest
-	if err := a.decodeJSON(r, &req); err != nil {
-		if isHTMX {
-			w.WriteHeader(http.StatusBadRequest)
-			renderHTML(w, templates.ErrorRow(err.Error()))
-		} else {
-			a.writeError(w, http.StatusBadRequest, err.Error())
-		}
+	if err := r.ParseForm(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.ErrorRow("invalid form data"))
 		return
 	}
 
+	mac := strings.TrimSpace(r.FormValue("mac"))
+	hostname := strings.TrimSpace(r.FormValue("hostname"))
+
+	if mac == "" && hostname == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.ErrorRow("hostname or mac is required"))
+		return
+	}
+
+	req := wakeRequest{MAC: mac, Hostname: hostname}
 	host, err := a.resolveWakeTarget(req)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, errHostNotFound) {
 			status = http.StatusNotFound
 		}
-		if isHTMX {
-			w.WriteHeader(status)
-			renderHTML(w, templates.ErrorRow(err.Error()))
-		} else {
-			a.writeError(w, status, err.Error())
-		}
+		w.WriteHeader(status)
+		renderHTML(w, templates.ErrorRow(err.Error()))
 		return
 	}
 
 	if host.Disabled {
-		if isHTMX {
-			w.WriteHeader(http.StatusForbidden)
-			renderHTML(w, templates.ErrorRow("Host is disabled"))
-		} else {
-			a.writeError(w, http.StatusForbidden, "host is disabled")
-		}
+		w.WriteHeader(http.StatusForbidden)
+		renderHTML(w, templates.ErrorRow("Host is disabled"))
 		return
 	}
 
 	cfg := a.cfgMgr.Get()
 	if err := internalwol.SendMagicPacket(host.MAC, cfg.Network); err != nil {
 		a.logger.Error("send magic packet", err, "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
-		if isHTMX {
-			w.WriteHeader(http.StatusBadGateway)
-			renderHTML(w, templates.ErrorRow("Failed to send magic packet"))
-		} else {
-			a.writeError(w, http.StatusBadGateway, "failed to send magic packet")
-		}
+		w.WriteHeader(http.StatusBadGateway)
+		renderHTML(w, templates.ErrorRow("Failed to send magic packet"))
 		return
 	}
 
 	a.logger.Info("sent magic packet", "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
 
-	if isHTMX {
-		// Return updated table for HTMX
-		hosts := a.getHostStatuses()
-		renderHTML(w, templates.StatusTableRows(hosts))
-	} else {
-		a.writeJSON(w, http.StatusOK, hostStatus{HostRecord: host, Active: host.LastSeen.After(time.Now().Add(-cfg.Timeout))})
-	}
-}
-
-func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	cfg := a.cfgMgr.Get()
-	records := a.registry.List()
-	hosts := make([]hostStatus, 0, len(records))
-	cutoff := time.Now().Add(-cfg.Timeout)
-	for _, host := range records {
-		hosts = append(hosts, hostStatus{HostRecord: host, Active: host.LastSeen.After(cutoff)})
-	}
-	a.writeJSON(w, http.StatusOK, statusResponse{Hosts: hosts})
+	hosts := a.getHostStatuses()
+	renderHTML(w, templates.StatusTableRows(hosts))
 }
 
 func (a *App) resolveWakeTarget(req wakeRequest) (HostRecord, error) {
@@ -290,47 +216,51 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req registerRequest
-	if err := a.decodeJSON(r, &req); err != nil {
-		a.writeError(w, http.StatusBadRequest, err.Error())
+	if err := r.ParseForm(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.AddHostError("invalid form data"))
 		return
 	}
 
-	mac, err := internalwol.NormalizeMAC(req.MAC)
+	macStr := strings.TrimSpace(r.FormValue("mac"))
+	hostname := strings.TrimSpace(r.FormValue("hostname"))
+	ipStr := strings.TrimSpace(r.FormValue("ip"))
+
+	mac, err := internalwol.NormalizeMAC(macStr)
 	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.AddHostError("invalid MAC address"))
 		return
 	}
 
-	if req.Hostname == "" {
-		req.Hostname = mac
+	if hostname == "" {
+		hostname = mac
 	}
 
-	ip := net.ParseIP(req.IP)
+	ip := net.ParseIP(ipStr)
 	if ip == nil || ip.To4() == nil {
-		a.writeError(w, http.StatusBadRequest, "invalid IPv4 address")
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.AddHostError("invalid IPv4 address"))
 		return
 	}
 
 	host := HostRecord{
 		MAC:      mac,
-		Hostname: strings.TrimSpace(req.Hostname),
+		Hostname: hostname,
 		IP:       ip.String(),
 		LastSeen: time.Unix(0, 0),
 	}
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("persist host addition", err, "mac", mac)
-		a.writeError(w, http.StatusInternalServerError, "failed to store host")
+		w.WriteHeader(http.StatusInternalServerError)
+		renderHTML(w, templates.AddHostError("failed to store host"))
 		return
 	}
 
 	a.logger.Info("added host", "mac", host.MAC, "hostname", host.Hostname, "ip", host.IP)
-	cfg := a.cfgMgr.Get()
-	a.writeJSON(w, http.StatusOK, hostStatus{
-		HostRecord:        host,
-		Active:            false,
-		HeartbeatInterval: cfg.Heartbeat.String(),
-	})
+
+	w.WriteHeader(http.StatusOK)
+	renderHTML(w, templates.AddHostSuccess(hostname))
 }
 
 func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
@@ -339,62 +269,37 @@ func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isHTMX := r.Header.Get("HX-Request") == "true"
-
-	// Extract MAC from path: /hosts/{mac}
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		if isHTMX {
-			w.WriteHeader(http.StatusBadRequest)
-			renderHTML(w, templates.ErrorRow("MAC address is required"))
-		} else {
-			a.writeError(w, http.StatusBadRequest, "MAC address is required")
-		}
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.ErrorRow("MAC address is required"))
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		if isHTMX {
-			w.WriteHeader(http.StatusBadRequest)
-			renderHTML(w, templates.ErrorRow("Invalid MAC address"))
-		} else {
-			a.writeError(w, http.StatusBadRequest, "invalid MAC address")
-		}
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.ErrorRow("Invalid MAC address"))
 		return
 	}
 
-	// Check host exists before deleting
 	if _, ok := a.registry.FindByMAC(normalized); !ok {
-		if isHTMX {
-			w.WriteHeader(http.StatusNotFound)
-			renderHTML(w, templates.ErrorRow("Host not found"))
-		} else {
-			a.writeError(w, http.StatusNotFound, "host not found")
-		}
+		w.WriteHeader(http.StatusNotFound)
+		renderHTML(w, templates.ErrorRow("Host not found"))
 		return
 	}
 
 	if err := a.registry.Delete(normalized); err != nil {
 		a.logger.Error("delete host", err, "mac", normalized)
-		if isHTMX {
-			w.WriteHeader(http.StatusInternalServerError)
-			renderHTML(w, templates.ErrorRow("Failed to delete host"))
-		} else {
-			a.writeError(w, http.StatusInternalServerError, "failed to delete host")
-		}
+		w.WriteHeader(http.StatusInternalServerError)
+		renderHTML(w, templates.ErrorRow("Failed to delete host"))
 		return
 	}
 
 	a.logger.Info("deleted host", "mac", normalized)
 
-	if isHTMX {
-		// Return updated table for HTMX
-		hosts := a.getHostStatuses()
-		renderHTML(w, templates.StatusTableRows(hosts))
-	} else {
-		a.writeJSON(w, http.StatusOK, map[string]string{"message": "host deleted"})
-	}
+	hosts := a.getHostStatuses()
+	renderHTML(w, templates.StatusTableRows(hosts))
 }
 
 func (a *App) handleDisableHost(w http.ResponseWriter, r *http.Request) {
@@ -403,73 +308,45 @@ func (a *App) handleDisableHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isHTMX := r.Header.Get("HX-Request") == "true"
-
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		if isHTMX {
-			w.WriteHeader(http.StatusBadRequest)
-			renderHTML(w, templates.ErrorRow("MAC address is required"))
-		} else {
-			a.writeError(w, http.StatusBadRequest, "MAC address is required")
-		}
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.ErrorRow("MAC address is required"))
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		if isHTMX {
-			w.WriteHeader(http.StatusBadRequest)
-			renderHTML(w, templates.ErrorRow("Invalid MAC address"))
-		} else {
-			a.writeError(w, http.StatusBadRequest, "invalid MAC address")
-		}
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.ErrorRow("Invalid MAC address"))
 		return
 	}
 
 	host, ok := a.registry.FindByMAC(normalized)
 	if !ok {
-		if isHTMX {
-			w.WriteHeader(http.StatusNotFound)
-			renderHTML(w, templates.ErrorRow("Host not found"))
-		} else {
-			a.writeError(w, http.StatusNotFound, "host not found")
-		}
+		w.WriteHeader(http.StatusNotFound)
+		renderHTML(w, templates.ErrorRow("Host not found"))
 		return
 	}
 
 	if host.Disabled {
-		if isHTMX {
-			w.WriteHeader(http.StatusConflict)
-			hosts := a.getHostStatuses()
-			renderHTML(w, templates.StatusTableRows(hosts))
-		} else {
-			a.writeError(w, http.StatusConflict, "host is already disabled")
-		}
+		hosts := a.getHostStatuses()
+		renderHTML(w, templates.StatusTableRows(hosts))
 		return
 	}
 
 	host.Disabled = true
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("disable host", err, "mac", normalized)
-		if isHTMX {
-			w.WriteHeader(http.StatusInternalServerError)
-			renderHTML(w, templates.ErrorRow("Failed to disable host"))
-		} else {
-			a.writeError(w, http.StatusInternalServerError, "failed to disable host")
-		}
+		w.WriteHeader(http.StatusInternalServerError)
+		renderHTML(w, templates.ErrorRow("Failed to disable host"))
 		return
 	}
 
 	a.logger.Info("disabled host", "mac", normalized)
 
-	if isHTMX {
-		// Return updated table for HTMX
-		hosts := a.getHostStatuses()
-		renderHTML(w, templates.StatusTableRows(hosts))
-	} else {
-		a.writeJSON(w, http.StatusOK, host)
-	}
+	hosts := a.getHostStatuses()
+	renderHTML(w, templates.StatusTableRows(hosts))
 }
 
 func (a *App) handleEnableHost(w http.ResponseWriter, r *http.Request) {
@@ -478,73 +355,45 @@ func (a *App) handleEnableHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isHTMX := r.Header.Get("HX-Request") == "true"
-
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		if isHTMX {
-			w.WriteHeader(http.StatusBadRequest)
-			renderHTML(w, templates.ErrorRow("MAC address is required"))
-		} else {
-			a.writeError(w, http.StatusBadRequest, "MAC address is required")
-		}
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.ErrorRow("MAC address is required"))
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		if isHTMX {
-			w.WriteHeader(http.StatusBadRequest)
-			renderHTML(w, templates.ErrorRow("Invalid MAC address"))
-		} else {
-			a.writeError(w, http.StatusBadRequest, "invalid MAC address")
-		}
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.ErrorRow("Invalid MAC address"))
 		return
 	}
 
 	host, ok := a.registry.FindByMAC(normalized)
 	if !ok {
-		if isHTMX {
-			w.WriteHeader(http.StatusNotFound)
-			renderHTML(w, templates.ErrorRow("Host not found"))
-		} else {
-			a.writeError(w, http.StatusNotFound, "host not found")
-		}
+		w.WriteHeader(http.StatusNotFound)
+		renderHTML(w, templates.ErrorRow("Host not found"))
 		return
 	}
 
 	if !host.Disabled {
-		if isHTMX {
-			w.WriteHeader(http.StatusConflict)
-			hosts := a.getHostStatuses()
-			renderHTML(w, templates.StatusTableRows(hosts))
-		} else {
-			a.writeError(w, http.StatusConflict, "host is already enabled")
-		}
+		hosts := a.getHostStatuses()
+		renderHTML(w, templates.StatusTableRows(hosts))
 		return
 	}
 
 	host.Disabled = false
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("enable host", err, "mac", normalized)
-		if isHTMX {
-			w.WriteHeader(http.StatusInternalServerError)
-			renderHTML(w, templates.ErrorRow("Failed to enable host"))
-		} else {
-			a.writeError(w, http.StatusInternalServerError, "failed to enable host")
-		}
+		w.WriteHeader(http.StatusInternalServerError)
+		renderHTML(w, templates.ErrorRow("Failed to enable host"))
 		return
 	}
 
 	a.logger.Info("enabled host", "mac", normalized)
 
-	if isHTMX {
-		// Return updated table for HTMX
-		hosts := a.getHostStatuses()
-		renderHTML(w, templates.StatusTableRows(hosts))
-	} else {
-		a.writeJSON(w, http.StatusOK, host)
-	}
+	hosts := a.getHostStatuses()
+	renderHTML(w, templates.StatusTableRows(hosts))
 }
 
 func (a *App) handleConfigReload(w http.ResponseWriter, r *http.Request) {
@@ -572,10 +421,8 @@ func (a *App) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := w.Write(a.settingsHTML); err != nil {
-		a.logger.Error("write settings response", err)
-	}
+	cfg := a.cfgMgr.Get()
+	renderHTML(w, templates.SettingsPage(&cfg))
 }
 
 func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -587,6 +434,157 @@ func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.ErrorRow("invalid form data"))
+		return
+	}
+
+	// Validate and update settings
+	cfg := a.cfgMgr.Get()
+
+	// Save original config values before modification
+	oldToken := cfg.Token
+	oldUsers := make([]int64, len(cfg.Users))
+	copy(oldUsers, cfg.Users)
+	oldWhoami := cfg.Whoami
+
+	network := strings.TrimSpace(r.FormValue("network"))
+	if err := internalwol.ValidateBroadcast(network); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.SettingsError("invalid network: "+err.Error(), &cfg))
+		return
+	}
+
+	timeoutStr := strings.TrimSpace(r.FormValue("timeout"))
+	timeout, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.SettingsError("invalid timeout: "+err.Error(), &cfg))
+		return
+	}
+	if timeout <= 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.SettingsError("timeout must be greater than 0", &cfg))
+		return
+	}
+
+	heartbeatStr := strings.TrimSpace(r.FormValue("heartbeat"))
+	heartbeat, err := time.ParseDuration(heartbeatStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.SettingsError("invalid heartbeat: "+err.Error(), &cfg))
+		return
+	}
+	if heartbeat <= 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.SettingsError("heartbeat must be greater than 0", &cfg))
+		return
+	}
+
+	cfgRefreshStr := strings.TrimSpace(r.FormValue("configRefresh"))
+	cfgRefresh, err := time.ParseDuration(cfgRefreshStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.SettingsError("invalid configRefresh: "+err.Error(), &cfg))
+		return
+	}
+	if cfgRefresh <= 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		renderHTML(w, templates.SettingsError("configRefresh must be greater than 0", &cfg))
+		return
+	}
+
+	// Handle token - only allow setting it once
+	newToken := strings.TrimSpace(r.FormValue("telegramToken"))
+	if cfg.Token != "" && newToken != "" {
+		// Token is already set and user is trying to change it - not allowed
+		w.WriteHeader(http.StatusForbidden)
+		renderHTML(w, templates.SettingsError("token is already configured and cannot be changed", &cfg))
+		return
+	}
+
+	// Update config (port remains unchanged - requires server restart)
+	cfg.Network = network
+	cfg.Timeout = timeout
+	cfg.Heartbeat = heartbeat
+	cfg.ConfigRefresh = cfgRefresh
+	cfg.Whoami = r.FormValue("whoami") == "on"
+	if newToken != "" {
+		cfg.Token = newToken
+	}
+
+	if err := a.cfgMgr.Update(cfg); err != nil {
+		a.logger.Error("update config", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		renderHTML(w, templates.SettingsError("failed to update config: "+err.Error(), &cfg))
+		return
+	}
+
+	// Immediately reload config from disk to verify persistence and ensure consistency
+	if err := a.cfgMgr.Reload(); err != nil {
+		a.logger.Error("reload config after update", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		renderHTML(w, templates.SettingsError("settings saved but verification failed: "+err.Error(), &cfg))
+		return
+	}
+
+	// Get the freshly loaded config to verify all changes were persisted
+	verifiedCfg := a.cfgMgr.Get()
+
+	// Restart telegram service if any relevant settings changed
+	usersChanged := !eqInt64Slices(oldUsers, verifiedCfg.Users)
+	tokenChanged := oldToken != verifiedCfg.Token
+	whoamiChanged := oldWhoami != verifiedCfg.Whoami
+
+	if tokenChanged || usersChanged || whoamiChanged {
+		if verifiedCfg.Token != "" {
+			// Token is set - restart with new config
+			if a.telegramCancel != nil {
+				a.telegramCancel()
+			}
+			if a.telegram != nil {
+				a.telegram.Shutdown()
+			}
+			a.telegram = telegram.New(verifiedCfg.Token, verifiedCfg.Users, a, a.logger, verifiedCfg.Whoami)
+			a.telegramCtx, a.telegramCancel = context.WithCancel(context.Background())
+			if err := a.telegram.Start(a.telegramCtx); err != nil {
+				a.logger.Error("start telegram service after settings change", err)
+			}
+		} else {
+			// Token was cleared - stop telegram service
+			if a.telegramCancel != nil {
+				a.telegramCancel()
+			}
+			if a.telegram != nil {
+				a.telegram.Shutdown()
+			}
+		}
+	}
+
+	a.logger.Info("settings updated and verified successfully",
+		"tokenChanged", tokenChanged,
+		"usersChanged", usersChanged,
+		"whoamiChanged", whoamiChanged,
+		"network", verifiedCfg.Network,
+		"heartbeat", verifiedCfg.Heartbeat,
+		"timeout", verifiedCfg.Timeout,
+		"configRefresh", verifiedCfg.ConfigRefresh,
+		"whoami", verifiedCfg.Whoami,
+		"usersCount", len(verifiedCfg.Users),
+		"tokenSet", verifiedCfg.Token != "",
+	)
+
+	w.WriteHeader(http.StatusOK)
+	renderHTML(w, templates.SettingsUpdated())
 }
 
 func (a *App) getSettings(w http.ResponseWriter, r *http.Request) {
