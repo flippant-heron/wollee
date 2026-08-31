@@ -1,3 +1,76 @@
+// Main app shell state (nav actions on the authenticated layout)
+function wolleeApp() {
+  return {
+    error: '',
+    async reloadConfig() {
+      this.error = '';
+      try {
+        const response = await fetch('/config/reload', {
+          method: 'POST'
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({ error: 'reload failed' }));
+          throw new Error(payload.error || `reload failed: ${response.status}`);
+        }
+        showToast('Configuration reloaded successfully', 2000, 'success');
+        // Refresh table after config reload (no-op if not on the home page)
+        htmx.trigger('#status-table', 'statusRefresh');
+      } catch (error) {
+        this.error = error.message;
+        showToast(`Reload failed: ${error.message}`, 4000, 'error');
+      }
+    },
+    async logout() {
+      await authUtils.logout();
+    }
+  };
+}
+
+// Login / initial password setup page state
+function loginApp() {
+  return {
+    passwordSet: false,
+    loading: false,
+    password: '',
+    confirm: '',
+    error: '',
+    async initAuth() {
+      try {
+        const r = await fetch('/auth/status');
+        const d = await r.json();
+        this.passwordSet = d.passwordSet;
+        if (d.passwordSet) {
+          const authCheck = await fetch('/');
+          if (authCheck.ok) window.location = '/';
+        }
+      } catch (err) {
+        this.error = 'Failed to check auth status';
+      }
+    },
+    async handleAuth() {
+      if (this.password !== this.confirm && !this.passwordSet) {
+        this.error = 'Passwords do not match';
+        return;
+      }
+      this.loading = true;
+      this.error = '';
+      try {
+        const endpoint = this.passwordSet ? '/auth/login' : '/auth/setup';
+        const r = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: this.password })
+        });
+        if (!r.ok) throw new Error('Authentication failed');
+        window.location = '/';
+      } catch (err) {
+        this.error = err.message;
+        this.loading = false;
+      }
+    }
+  };
+}
+
 // Confirmation Modal Helper
 function confirmModal(title, message) {
   return new Promise((resolve) => {

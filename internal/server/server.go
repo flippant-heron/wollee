@@ -23,10 +23,6 @@ type App struct {
 	telegramCtx     context.Context
 	telegramCancel  context.CancelFunc
 	staticFS        fs.FS
-	indexHTML       []byte
-	addHostHTML     []byte
-	settingsHTML    []byte
-	loginHTML       []byte
 	reloadTicker    *time.Ticker
 	registerLimiter *RateLimiter
 	wakeLimiter     *RateLimiter
@@ -90,26 +86,6 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 		return nil, fmt.Errorf("open static assets: %w", err)
 	}
 
-	indexHTML, err := webassets.Assets.ReadFile("index.html")
-	if err != nil {
-		return nil, fmt.Errorf("read index.html: %w", err)
-	}
-
-	addHostHTML, err := webassets.Assets.ReadFile("add-host.html")
-	if err != nil {
-		return nil, fmt.Errorf("read add-host.html: %w", err)
-	}
-
-	settingsHTML, err := webassets.Assets.ReadFile("settings.html")
-	if err != nil {
-		return nil, fmt.Errorf("read settings.html: %w", err)
-	}
-
-	loginHTML, err := webassets.Assets.ReadFile("login.html")
-	if err != nil {
-		return nil, fmt.Errorf("read login.html: %w", err)
-	}
-
 	requiredAssets := []string{
 		"alpine.min.js",
 		"blades.min.css",
@@ -129,10 +105,6 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 		logger:          logger,
 		registry:        registry,
 		staticFS:        staticFS,
-		indexHTML:       indexHTML,
-		addHostHTML:     addHostHTML,
-		settingsHTML:    settingsHTML,
-		loginHTML:       loginHTML,
 		registerLimiter: NewRateLimiter(60, time.Minute), // 10 registrations per minute per IP
 		wakeLimiter:     NewRateLimiter(30, time.Minute), // 30 wake requests per minute per IP
 	}

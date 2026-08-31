@@ -1,5 +1,11 @@
 package templates
 
+templ AddHostFullPage() {
+	@Layout("Add Host") {
+		@AddHostPage()
+	}
+}
+
 templ AddHostPage() {
 	<header>
 		<h1>Add new host</h1>

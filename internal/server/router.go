@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/flippant-heron/wollee/internal/auth"
+	"github.com/flippant-heron/wollee/internal/server/templates"
 )
 
 func (a *App) newRouter() http.Handler {
@@ -22,9 +23,7 @@ func (rm *routerMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Try to authenticate
 		if !rm.isAuthenticated(r) {
 			// Not authenticated - serve login page
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusUnauthorized)
-			if _, err := w.Write(rm.app.loginHTML); err != nil {
+			if err := renderHTMLStatus(w, http.StatusUnauthorized, templates.LoginPage()); err != nil {
 				rm.app.logger.Error("write login response", err)
 			}
 			return
@@ -35,9 +34,7 @@ func (rm *routerMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Root path requires authentication
 		if !rm.isAuthenticated(r) {
 			// Not authenticated - serve login page
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusUnauthorized)
-			if _, err := w.Write(rm.app.loginHTML); err != nil {
+			if err := renderHTMLStatus(w, http.StatusUnauthorized, templates.LoginPage()); err != nil {
 				rm.app.logger.Error("write login response", err)
 			}
 			return

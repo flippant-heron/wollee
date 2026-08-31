@@ -26,6 +26,15 @@ func renderHTML(w http.ResponseWriter, component templ.Component) error {
 	return component.Render(context.Background(), w)
 }
 
+// renderHTMLStatus sets the Content-Type header before writing the status
+// code, then renders the component. Content-Type must be set before
+// WriteHeader or it is silently dropped from the response.
+func renderHTMLStatus(w http.ResponseWriter, status int, component templ.Component) error {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	return component.Render(context.Background(), w)
+}
+
 // getHostStatuses converts registry hosts to template HostStatus objects
 func (a *App) getHostStatuses() []templates.HostStatus {
 	cfg := a.cfgMgr.Get()
@@ -58,10 +67,7 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Otherwise, return the full page
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := w.Write(a.indexHTML); err != nil {
-		a.logger.Error("write index response", err)
-	}
+	renderHTML(w, templates.IndexPage())
 }
 
 func (a *App) handleAddHostPage(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +76,12 @@ func (a *App) handleAddHostPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	renderHTML(w, templates.AddHostPage())
+	if r.Header.Get("HX-Request") == "true" {
+		renderHTML(w, templates.AddHostPage())
+		return
+	}
+
+	renderHTML(w, templates.AddHostFullPage())
 }
 
 func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
@@ -80,8 +91,7 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseForm(); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.ErrorRow("invalid form data"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("invalid form data"))
 		return
 	}
 
@@ -89,8 +99,7 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 	hostname := strings.TrimSpace(r.FormValue("hostname"))
 
 	if mac == "" && hostname == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.ErrorRow("hostname or mac is required"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("hostname or mac is required"))
 		return
 	}
 
@@ -101,22 +110,19 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errHostNotFound) {
 			status = http.StatusNotFound
 		}
-		w.WriteHeader(status)
-		renderHTML(w, templates.ErrorRow(err.Error()))
+		renderHTMLStatus(w, status, templates.ErrorRow(err.Error()))
 		return
 	}
 
 	if host.Disabled {
-		w.WriteHeader(http.StatusForbidden)
-		renderHTML(w, templates.ErrorRow("Host is disabled"))
+		renderHTMLStatus(w, http.StatusForbidden, templates.ErrorRow("Host is disabled"))
 		return
 	}
 
 	cfg := a.cfgMgr.Get()
 	if err := internalwol.SendMagicPacket(host.MAC, cfg.Network); err != nil {
 		a.logger.Error("send magic packet", err, "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
-		w.WriteHeader(http.StatusBadGateway)
-		renderHTML(w, templates.ErrorRow("Failed to send magic packet"))
+		renderHTMLStatus(w, http.StatusBadGateway, templates.ErrorRow("Failed to send magic packet"))
 		return
 	}
 
@@ -217,8 +223,7 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseForm(); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.AddHostError("invalid form data"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.AddHostError("invalid form data"))
 		return
 	}
 
@@ -228,8 +233,7 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 
 	mac, err := internalwol.NormalizeMAC(macStr)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.AddHostError("invalid MAC address"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.AddHostError("invalid MAC address"))
 		return
 	}
 
@@ -239,8 +243,7 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 
 	ip := net.ParseIP(ipStr)
 	if ip == nil || ip.To4() == nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.AddHostError("invalid IPv4 address"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.AddHostError("invalid IPv4 address"))
 		return
 	}
 
@@ -252,15 +255,13 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("persist host addition", err, "mac", mac)
-		w.WriteHeader(http.StatusInternalServerError)
-		renderHTML(w, templates.AddHostError("failed to store host"))
+		renderHTMLStatus(w, http.StatusInternalServerError, templates.AddHostError("failed to store host"))
 		return
 	}
 
 	a.logger.Info("added host", "mac", host.MAC, "hostname", host.Hostname, "ip", host.IP)
 
-	w.WriteHeader(http.StatusOK)
-	renderHTML(w, templates.AddHostSuccess(hostname))
+	renderHTMLStatus(w, http.StatusOK, templates.AddHostSuccess(hostname))
 }
 
 func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
@@ -271,28 +272,24 @@ func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
 
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.ErrorRow("MAC address is required"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("MAC address is required"))
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.ErrorRow("Invalid MAC address"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("Invalid MAC address"))
 		return
 	}
 
 	if _, ok := a.registry.FindByMAC(normalized); !ok {
-		w.WriteHeader(http.StatusNotFound)
-		renderHTML(w, templates.ErrorRow("Host not found"))
+		renderHTMLStatus(w, http.StatusNotFound, templates.ErrorRow("Host not found"))
 		return
 	}
 
 	if err := a.registry.Delete(normalized); err != nil {
 		a.logger.Error("delete host", err, "mac", normalized)
-		w.WriteHeader(http.StatusInternalServerError)
-		renderHTML(w, templates.ErrorRow("Failed to delete host"))
+		renderHTMLStatus(w, http.StatusInternalServerError, templates.ErrorRow("Failed to delete host"))
 		return
 	}
 
@@ -310,22 +307,19 @@ func (a *App) handleDisableHost(w http.ResponseWriter, r *http.Request) {
 
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.ErrorRow("MAC address is required"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("MAC address is required"))
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.ErrorRow("Invalid MAC address"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("Invalid MAC address"))
 		return
 	}
 
 	host, ok := a.registry.FindByMAC(normalized)
 	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		renderHTML(w, templates.ErrorRow("Host not found"))
+		renderHTMLStatus(w, http.StatusNotFound, templates.ErrorRow("Host not found"))
 		return
 	}
 
@@ -338,8 +332,7 @@ func (a *App) handleDisableHost(w http.ResponseWriter, r *http.Request) {
 	host.Disabled = true
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("disable host", err, "mac", normalized)
-		w.WriteHeader(http.StatusInternalServerError)
-		renderHTML(w, templates.ErrorRow("Failed to disable host"))
+		renderHTMLStatus(w, http.StatusInternalServerError, templates.ErrorRow("Failed to disable host"))
 		return
 	}
 
@@ -357,22 +350,19 @@ func (a *App) handleEnableHost(w http.ResponseWriter, r *http.Request) {
 
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.ErrorRow("MAC address is required"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("MAC address is required"))
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.ErrorRow("Invalid MAC address"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("Invalid MAC address"))
 		return
 	}
 
 	host, ok := a.registry.FindByMAC(normalized)
 	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		renderHTML(w, templates.ErrorRow("Host not found"))
+		renderHTMLStatus(w, http.StatusNotFound, templates.ErrorRow("Host not found"))
 		return
 	}
 
@@ -385,8 +375,7 @@ func (a *App) handleEnableHost(w http.ResponseWriter, r *http.Request) {
 	host.Disabled = false
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("enable host", err, "mac", normalized)
-		w.WriteHeader(http.StatusInternalServerError)
-		renderHTML(w, templates.ErrorRow("Failed to enable host"))
+		renderHTMLStatus(w, http.StatusInternalServerError, templates.ErrorRow("Failed to enable host"))
 		return
 	}
 
@@ -422,7 +411,12 @@ func (a *App) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := a.cfgMgr.Get()
-	renderHTML(w, templates.SettingsPage(&cfg))
+	if r.Header.Get("HX-Request") == "true" {
+		renderHTML(w, templates.SettingsPage(&cfg))
+		return
+	}
+
+	renderHTML(w, templates.SettingsFullPage(&cfg))
 }
 
 func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -443,8 +437,7 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseForm(); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.ErrorRow("invalid form data"))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("invalid form data"))
 		return
 	}
 
@@ -459,47 +452,40 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 
 	network := strings.TrimSpace(r.FormValue("network"))
 	if err := internalwol.ValidateBroadcast(network); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.SettingsError("invalid network: "+err.Error(), &cfg))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid network: "+err.Error(), &cfg))
 		return
 	}
 
 	timeoutStr := strings.TrimSpace(r.FormValue("timeout"))
 	timeout, err := time.ParseDuration(timeoutStr)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.SettingsError("invalid timeout: "+err.Error(), &cfg))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid timeout: "+err.Error(), &cfg))
 		return
 	}
 	if timeout <= 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.SettingsError("timeout must be greater than 0", &cfg))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("timeout must be greater than 0", &cfg))
 		return
 	}
 
 	heartbeatStr := strings.TrimSpace(r.FormValue("heartbeat"))
 	heartbeat, err := time.ParseDuration(heartbeatStr)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.SettingsError("invalid heartbeat: "+err.Error(), &cfg))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid heartbeat: "+err.Error(), &cfg))
 		return
 	}
 	if heartbeat <= 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.SettingsError("heartbeat must be greater than 0", &cfg))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("heartbeat must be greater than 0", &cfg))
 		return
 	}
 
 	cfgRefreshStr := strings.TrimSpace(r.FormValue("configRefresh"))
 	cfgRefresh, err := time.ParseDuration(cfgRefreshStr)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.SettingsError("invalid configRefresh: "+err.Error(), &cfg))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid configRefresh: "+err.Error(), &cfg))
 		return
 	}
 	if cfgRefresh <= 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		renderHTML(w, templates.SettingsError("configRefresh must be greater than 0", &cfg))
+		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("configRefresh must be greater than 0", &cfg))
 		return
 	}
 
@@ -507,8 +493,7 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 	newToken := strings.TrimSpace(r.FormValue("telegramToken"))
 	if cfg.Token != "" && newToken != "" {
 		// Token is already set and user is trying to change it - not allowed
-		w.WriteHeader(http.StatusForbidden)
-		renderHTML(w, templates.SettingsError("token is already configured and cannot be changed", &cfg))
+		renderHTMLStatus(w, http.StatusForbidden, templates.SettingsError("token is already configured and cannot be changed", &cfg))
 		return
 	}
 
@@ -524,16 +509,14 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.cfgMgr.Update(cfg); err != nil {
 		a.logger.Error("update config", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		renderHTML(w, templates.SettingsError("failed to update config: "+err.Error(), &cfg))
+		renderHTMLStatus(w, http.StatusInternalServerError, templates.SettingsError("failed to update config: "+err.Error(), &cfg))
 		return
 	}
 
 	// Immediately reload config from disk to verify persistence and ensure consistency
 	if err := a.cfgMgr.Reload(); err != nil {
 		a.logger.Error("reload config after update", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		renderHTML(w, templates.SettingsError("settings saved but verification failed: "+err.Error(), &cfg))
+		renderHTMLStatus(w, http.StatusInternalServerError, templates.SettingsError("settings saved but verification failed: "+err.Error(), &cfg))
 		return
 	}
 
@@ -583,8 +566,7 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 		"tokenSet", verifiedCfg.Token != "",
 	)
 
-	w.WriteHeader(http.StatusOK)
-	renderHTML(w, templates.SettingsUpdated())
+	renderHTMLStatus(w, http.StatusOK, templates.SettingsUpdated())
 }
 
 func (a *App) getSettings(w http.ResponseWriter, r *http.Request) {

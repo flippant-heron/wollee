@@ -117,6 +117,12 @@ func statusText(host HostStatus) string {
 	return "Offline"
 }
 
+templ IndexPage() {
+	@Layout("Home") {
+		@HomePage()
+	}
+}
+
 templ HomePage() {
 	<header>
 		<h1>Wake-on-LAN hosts</h1>

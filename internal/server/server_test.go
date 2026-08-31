@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -278,5 +279,187 @@ func TestStatusTableReturnsHTMLFragment(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(body), []byte("disabled")) {
 		t.Fatal("response missing 'disabled' class for disabled host")
+	}
+}
+
+func newTestApp(t *testing.T) *App {
+	t.Helper()
+
+	registry, err := OpenRegistry(filepath.Join(t.TempDir(), "hosts.yaml"))
+	if err != nil {
+		t.Fatalf("OpenRegistry() error = %v", err)
+	}
+
+	cfg := config.ServerConfig{
+		Port:      8080,
+		Network:   "192.168.1.0/24",
+		Heartbeat: 30 * time.Second,
+		Timeout:   5 * time.Minute,
+	}
+	cfgMgr := config.NewManager("", cfg)
+
+	return &App{
+		cfgMgr:   cfgMgr,
+		registry: registry,
+		logger:   appservice.NewLogger(true),
+	}
+}
+
+// isFullHTMLPage reports whether body looks like a complete HTML document
+// (as opposed to an HTMX fragment meant to be swapped into an existing page).
+func isFullHTMLPage(body string) bool {
+	return bytes.Contains([]byte(body), []byte("<!doctype html>")) && bytes.Contains([]byte(body), []byte("<nav"))
+}
+
+func TestHandleIndexFullPageVsFragment(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	// Full page load (no HX-Request header) must return the complete document.
+	fullReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	fullResp := httptest.NewRecorder()
+	app.handleIndex(fullResp, fullReq)
+
+	if fullResp.Code != http.StatusOK {
+		t.Fatalf("full page status = %d, want %d", fullResp.Code, http.StatusOK)
+	}
+	if ct := fullResp.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("full page Content-Type = %q, want text/html; charset=utf-8", ct)
+	}
+	if !isFullHTMLPage(fullResp.Body.String()) {
+		t.Fatalf("full page response does not look like a full HTML document: %s", fullResp.Body.String())
+	}
+
+	// HTMX fragment request must return only the inner article content.
+	fragReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	fragReq.Header.Set("HX-Request", "true")
+	fragResp := httptest.NewRecorder()
+	app.handleIndex(fragResp, fragReq)
+
+	if fragResp.Code != http.StatusOK {
+		t.Fatalf("fragment status = %d, want %d", fragResp.Code, http.StatusOK)
+	}
+	if isFullHTMLPage(fragResp.Body.String()) {
+		t.Fatalf("fragment response should not contain full page shell: %s", fragResp.Body.String())
+	}
+	if !bytes.Contains(fragResp.Body.Bytes(), []byte("status-table")) {
+		t.Fatal("fragment response missing status table content")
+	}
+}
+
+func TestHandleAddHostPageFullPageVsFragment(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	fullReq := httptest.NewRequest(http.MethodGet, "/add-host", nil)
+	fullResp := httptest.NewRecorder()
+	app.handleAddHostPage(fullResp, fullReq)
+
+	if fullResp.Code != http.StatusOK {
+		t.Fatalf("full page status = %d, want %d", fullResp.Code, http.StatusOK)
+	}
+	if !isFullHTMLPage(fullResp.Body.String()) {
+		t.Fatalf("full page response does not look like a full HTML document: %s", fullResp.Body.String())
+	}
+
+	fragReq := httptest.NewRequest(http.MethodGet, "/add-host", nil)
+	fragReq.Header.Set("HX-Request", "true")
+	fragResp := httptest.NewRecorder()
+	app.handleAddHostPage(fragResp, fragReq)
+
+	if fragResp.Code != http.StatusOK {
+		t.Fatalf("fragment status = %d, want %d", fragResp.Code, http.StatusOK)
+	}
+	if isFullHTMLPage(fragResp.Body.String()) {
+		t.Fatalf("fragment response should not contain full page shell: %s", fragResp.Body.String())
+	}
+	if !bytes.Contains(fragResp.Body.Bytes(), []byte("Add new host")) {
+		t.Fatal("fragment response missing add-host form heading")
+	}
+}
+
+func TestHandleSettingsPageFullPageVsFragment(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	fullReq := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	fullResp := httptest.NewRecorder()
+	app.handleSettingsPage(fullResp, fullReq)
+
+	if fullResp.Code != http.StatusOK {
+		t.Fatalf("full page status = %d, want %d", fullResp.Code, http.StatusOK)
+	}
+	if !isFullHTMLPage(fullResp.Body.String()) {
+		t.Fatalf("full page response does not look like a full HTML document: %s", fullResp.Body.String())
+	}
+
+	fragReq := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	fragReq.Header.Set("HX-Request", "true")
+	fragResp := httptest.NewRecorder()
+	app.handleSettingsPage(fragResp, fragReq)
+
+	if fragResp.Code != http.StatusOK {
+		t.Fatalf("fragment status = %d, want %d", fragResp.Code, http.StatusOK)
+	}
+	if isFullHTMLPage(fragResp.Body.String()) {
+		t.Fatalf("fragment response should not contain full page shell: %s", fragResp.Body.String())
+	}
+	if !bytes.Contains(fragResp.Body.Bytes(), []byte("Save Settings")) {
+		t.Fatal("fragment response missing settings form")
+	}
+}
+
+func TestHandleWakeErrorSetsHTMLContentType(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/wake", strings.NewReader("mac=&hostname="))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	app.handleWake(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+	// Content-Type must be set even though WriteHeader happens as part of the
+	// same call (regression test: Content-Type set after WriteHeader is a no-op).
+	if ct := resp.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want text/html; charset=utf-8", ct)
+	}
+}
+
+func TestUnauthenticatedRequestServesLoginPage(t *testing.T) {
+	t.Parallel()
+
+	cfgMgr := config.NewManager("", config.ServerConfig{Port: 8080, Heartbeat: 30 * time.Second})
+	registry, err := OpenRegistry(filepath.Join(t.TempDir(), "hosts.yaml"))
+	if err != nil {
+		t.Fatalf("OpenRegistry() error = %v", err)
+	}
+
+	app, err := New(cfgMgr, registry, appservice.NewLogger(true))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	router := app.newRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusUnauthorized)
+	}
+	if ct := resp.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want text/html; charset=utf-8", ct)
+	}
+	if !bytes.Contains(resp.Body.Bytes(), []byte("loginApp")) {
+		t.Fatal("response does not look like the login page")
 	}
 }

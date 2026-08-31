@@ -14,6 +14,12 @@ func formatUsers(users []int64) string {
 	return strings.Join(strs, ", ")
 }
 
+templ SettingsFullPage(cfg *config.ServerConfig) {
+	@Layout("Settings") {
+		@SettingsPage(cfg)
+	}
+}
+
 templ SettingsPage(cfg *config.ServerConfig) {
 	<header>
 		<h1>Settings</h1>
