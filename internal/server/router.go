@@ -23,7 +23,7 @@ func (rm *routerMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Try to authenticate
 		if !rm.isAuthenticated(r) {
 			// Not authenticated - serve login page
-			if err := renderHTMLStatus(w, http.StatusUnauthorized, templates.LoginPage()); err != nil {
+			if err := renderHTMLStatus(w, http.StatusUnauthorized, templates.LoginPage(rm.app.logoDataURI)); err != nil {
 				rm.app.logger.Error("write login response", err)
 			}
 			return
@@ -34,7 +34,7 @@ func (rm *routerMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Root path requires authentication
 		if !rm.isAuthenticated(r) {
 			// Not authenticated - serve login page
-			if err := renderHTMLStatus(w, http.StatusUnauthorized, templates.LoginPage()); err != nil {
+			if err := renderHTMLStatus(w, http.StatusUnauthorized, templates.LoginPage(rm.app.logoDataURI)); err != nil {
 				rm.app.logger.Error("write login response", err)
 			}
 			return
@@ -104,6 +104,7 @@ func (a *App) createMux() *http.ServeMux {
 	mux.HandleFunc("/auth/login", a.handleLogin)
 	mux.HandleFunc("/auth/setup", a.handleSetupPassword)
 	mux.HandleFunc("/auth/logout", a.handleLogout)
+	mux.HandleFunc("/favicon.ico", a.handleFavicon)
 
 	// Protected auth endpoints
 	mux.HandleFunc("/auth/change-password", a.handleChangePassword)

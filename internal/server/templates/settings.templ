@@ -14,8 +14,8 @@ func formatUsers(users []int64) string {
 	return strings.Join(strs, ", ")
 }
 
-templ SettingsFullPage(cfg *config.ServerConfig) {
-	@Layout("Settings") {
+templ SettingsFullPage(cfg *config.ServerConfig, logoDataURI string) {
+	@Layout("Settings", logoDataURI) {
 		@SettingsPage(cfg)
 	}
 }

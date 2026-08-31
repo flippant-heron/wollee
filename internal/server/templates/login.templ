@@ -2,13 +2,16 @@ package templates
 
 // LoginPage is a standalone full page (not wrapped in Layout) since it has no
 // authenticated nav and must render before any auth token exists.
-templ LoginPage() {
+templ LoginPage(logoDataURI string) {
 	<!doctype html>
 	<html lang="en">
 	<head>
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<title>wollee - Login</title>
+		if logoDataURI != "" {
+			<link rel="icon" type="image/png" href={ "/favicon.ico?v=" + faviconVersion(logoDataURI) }/>
+		}
 		<link rel="stylesheet" href="/static/blades.min.css"/>
 		<link rel="stylesheet" href="/static/app.css"/>
 		<link rel="stylesheet" href="/static/material-symbols.css"/>

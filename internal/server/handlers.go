@@ -54,6 +54,19 @@ func (a *App) getHostStatuses() []templates.HostStatus {
 	return hosts
 }
 
+// handleFavicon serves the configured logo as the site favicon. There is no
+// separate favicon asset; browsers accept arbitrary raster image formats and
+// sizes for rel="icon", so the logo bytes are reused as-is.
+func (a *App) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	if len(a.faviconData) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", a.faviconContentType)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(a.faviconData)
+}
+
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -67,7 +80,7 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Otherwise, return the full page
-	renderHTML(w, templates.IndexPage())
+	renderHTML(w, templates.IndexPage(a.logoDataURI))
 }
 
 func (a *App) handleAddHostPage(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +94,7 @@ func (a *App) handleAddHostPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	renderHTML(w, templates.AddHostFullPage())
+	renderHTML(w, templates.AddHostFullPage(a.logoDataURI))
 }
 
 func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
@@ -416,7 +429,7 @@ func (a *App) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	renderHTML(w, templates.SettingsFullPage(&cfg))
+	renderHTML(w, templates.SettingsFullPage(&cfg, a.logoDataURI))
 }
 
 func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {

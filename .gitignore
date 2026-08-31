@@ -1,5 +1,6 @@
 config.yaml
 web/static/*
+!web/static/logo.png
 !web/static/common.js
 !web/static/app.css
 *.ignore

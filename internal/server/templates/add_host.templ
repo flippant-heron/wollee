@@ -1,7 +1,7 @@
 package templates
 
-templ AddHostFullPage() {
-	@Layout("Add Host") {
+templ AddHostFullPage(logoDataURI string) {
+	@Layout("Add Host", logoDataURI) {
 		@AddHostPage()
 	}
 }

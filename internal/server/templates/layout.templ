@@ -1,15 +1,34 @@
 package templates
 
+import (
+	"hash/fnv"
+	"strconv"
+)
+
+// faviconVersion derives a short cache-busting token from the resolved logo
+// so browsers refetch /favicon.ico when the configured logo or crop mode
+// changes, instead of sticking with whatever they cached under the origin's
+// bare /favicon.ico URL (browsers cache favicons more aggressively than a
+// normal HTTP response, even across hard reloads).
+func faviconVersion(logoDataURI string) string {
+	h := fnv.New32a()
+	h.Write([]byte(logoDataURI))
+	return strconv.FormatUint(uint64(h.Sum32()), 36)
+}
+
 // Layout is the shared page shell (head, nav, article wrapper) used by every
 // authenticated full-page (non-HTMX) response so nav/theme/logout behavior is
 // identical regardless of which page was loaded directly.
-templ Layout(title string) {
+templ Layout(title string, logoDataURI string) {
 	<!doctype html>
 	<html lang="en">
 	<head>
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<title>{ title } - wollee</title>
+		if logoDataURI != "" {
+			<link rel="icon" type="image/png" href={ "/favicon.ico?v=" + faviconVersion(logoDataURI) }/>
+		}
 		<link rel="stylesheet" href="/static/blades.min.css"/>
 		<link rel="stylesheet" href="/static/app.css"/>
 		<link rel="stylesheet" href="/static/material-symbols.css"/>
@@ -20,7 +39,17 @@ templ Layout(title string) {
 	<body>
 		<main class="container" x-data="wolleeApp()" x-init="$store.theme.init()">
 			<nav x-data="{ navOpen: false }">
-				<ul><li><strong>wollee</strong></li></ul>
+				<ul>
+					<li>
+						<a href="/" hx-get="/" hx-target="#article-content" hx-swap="innerHTML" class="nav-brand" title="Go to home page">
+							if logoDataURI != "" {
+								<img src={ logoDataURI } alt="wollee" class="nav-logo"/>
+							} else {
+								<strong>wollee</strong>
+							}
+						</a>
+					</li>
+				</ul>
 				<button type="button" class="nav-toggle" @click="navOpen = !navOpen" title="Toggle menu">
 					<span class="material-symbols-outlined sm">menu</span>
 				</button>

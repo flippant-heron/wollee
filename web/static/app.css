@@ -38,6 +38,25 @@ nav li strong {
   min-width: max-content;
 }
 
+/* Brand link (logo or "wollee" text) back to the home page */
+.nav-brand {
+  display: flex;
+  align-items: center;
+  margin-right: auto;
+  color: inherit;
+  text-decoration: none;
+}
+
+.nav-brand strong {
+  margin-right: 0;
+}
+
+.nav-logo {
+  height: 1.5rem;
+  width: auto;
+  display: block;
+}
+
 /* Navbar buttons */
 nav button {
   padding: 0.5rem;

@@ -442,7 +442,7 @@ func TestUnauthenticatedRequestServesLoginPage(t *testing.T) {
 		t.Fatalf("OpenRegistry() error = %v", err)
 	}
 
-	app, err := New(cfgMgr, registry, appservice.NewLogger(true))
+	app, err := New(cfgMgr, registry, appservice.NewLogger(true), config.LogoConfig{})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

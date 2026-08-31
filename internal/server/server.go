@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/flippant-heron/wollee/internal/config"
@@ -15,17 +17,20 @@ import (
 )
 
 type App struct {
-	cfgMgr          *config.Manager
-	logger          *appservice.Logger
-	registry        *Registry
-	httpSrv         *http.Server
-	telegram        *telegram.Service
-	telegramCtx     context.Context
-	telegramCancel  context.CancelFunc
-	staticFS        fs.FS
-	reloadTicker    *time.Ticker
-	registerLimiter *RateLimiter
-	wakeLimiter     *RateLimiter
+	cfgMgr             *config.Manager
+	logger             *appservice.Logger
+	registry           *Registry
+	httpSrv            *http.Server
+	telegram           *telegram.Service
+	telegramCtx        context.Context
+	telegramCancel     context.CancelFunc
+	staticFS           fs.FS
+	logoDataURI        string
+	faviconData        []byte
+	faviconContentType string
+	reloadTicker       *time.Ticker
+	registerLimiter    *RateLimiter
+	wakeLimiter        *RateLimiter
 }
 
 type registerRequest struct {
@@ -73,7 +78,7 @@ type settingsResponse struct {
 	Whoami        bool    `json:"whoami"`
 }
 
-func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) (*App, error) {
+func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger, logo config.LogoConfig) (*App, error) {
 	if cfgMgr == nil {
 		return nil, errors.New("config manager is required")
 	}
@@ -100,17 +105,59 @@ func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger) 
 	}
 
 	cfg := cfgMgr.Get()
+	logoDataURI, faviconData, faviconContentType := resolveLogo(logo, staticFS, logger)
 	app := &App{
-		cfgMgr:          cfgMgr,
-		logger:          logger,
-		registry:        registry,
-		staticFS:        staticFS,
-		registerLimiter: NewRateLimiter(60, time.Minute), // 10 registrations per minute per IP
-		wakeLimiter:     NewRateLimiter(30, time.Minute), // 30 wake requests per minute per IP
+		cfgMgr:             cfgMgr,
+		logger:             logger,
+		registry:           registry,
+		staticFS:           staticFS,
+		logoDataURI:        logoDataURI,
+		faviconData:        faviconData,
+		faviconContentType: faviconContentType,
+		registerLimiter:    NewRateLimiter(60, time.Minute), // 10 registrations per minute per IP
+		wakeLimiter:        NewRateLimiter(30, time.Minute), // 30 wake requests per minute per IP
 	}
 
 	app.telegram = telegram.New(cfg.Token, cfg.Users, app, logger, cfg.Whoami)
 	return app, nil
+}
+
+// resolveLogo turns the configured logo into a src for the nav bar image,
+// preferring an inline base64 payload over a static asset path, plus a
+// favicon resized from the same source image (see generateFavicon) reused to
+// serve /favicon.ico. A path refers to a filename already embedded under
+// web/static (served at /static/), avoiding any dependence on the process's
+// working directory. Any failure to resolve a usable image falls back to
+// empty results so the caller shows the "wollee" text brand and skips the
+// favicon link instead.
+func resolveLogo(logo config.LogoConfig, staticFS fs.FS, logger *appservice.Logger) (dataURI string, faviconData []byte, faviconContentType string) {
+	if b64 := strings.TrimSpace(logo.Base64); b64 != "" {
+		data, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			logger.Error("decode logo.base64", err)
+			return "", nil, ""
+		}
+		favData, favType := generateFavicon(data, logo.FaviconMode, logger)
+		return buildDataURI(data), favData, favType
+	}
+
+	if path := strings.TrimSpace(logo.Path); path != "" {
+		path = strings.TrimPrefix(path, "/")
+		data, err := fs.ReadFile(staticFS, path)
+		if err != nil {
+			logger.Error("find logo.path in static assets, falling back to text brand", err, "path", path)
+			return "", nil, ""
+		}
+		favData, favType := generateFavicon(data, logo.FaviconMode, logger)
+		return "/static/" + path, favData, favType
+	}
+
+	return "", nil, ""
+}
+
+func buildDataURI(data []byte) string {
+	mimeType := http.DetectContentType(data)
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
 }
 
 func (a *App) Run(ctx context.Context) error {
