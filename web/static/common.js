@@ -163,7 +163,7 @@ const authUtils = {
   // Check if user is authenticated by trying to access a protected resource
   async isAuthenticated() {
     try {
-      const response = await fetch('/status', { method: 'GET' });
+      const response = await fetch('/status/table', { method: 'GET' });
       return response.ok;
     } catch {
       return false;

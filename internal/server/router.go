@@ -55,10 +55,11 @@ func (rm *routerMiddleware) isProtectedPath(path string) bool {
 		"/status",
 		"/config/reload",
 		"/hosts",
-		"/api/settings",
 	}
 	for _, prefix := range protectedPrefixes {
-		if path == prefix || (prefix[len(prefix)-1] == '/' && len(path) > len(prefix) && path[:len(prefix)] == prefix) {
+		// Match the prefix itself or any sub-path of it (e.g. "/hosts/{mac}",
+		// "/status/table"), not just an exact string match.
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
 	}
@@ -105,6 +106,8 @@ func (a *App) createMux() *http.ServeMux {
 	mux.HandleFunc("/auth/setup", a.handleSetupPassword)
 	mux.HandleFunc("/auth/logout", a.handleLogout)
 	mux.HandleFunc("/favicon.ico", a.handleFavicon)
+	// Downstream agent heartbeats - machine-to-machine, no JWT cookie/session.
+	mux.Handle("/register", a.RateLimitMiddleware(a.registerLimiter)(http.HandlerFunc(a.handleRegister)))
 
 	// Protected auth endpoints
 	mux.HandleFunc("/auth/change-password", a.handleChangePassword)
@@ -122,10 +125,6 @@ func (a *App) createMux() *http.ServeMux {
 	mux.HandleFunc("DELETE /hosts/{mac}", a.handleDeleteHost)
 	mux.HandleFunc("PATCH /hosts/{mac}/disable", a.handleDisableHost)
 	mux.HandleFunc("PATCH /hosts/{mac}/enable", a.handleEnableHost)
-
-	// JSON API endpoints
-	mux.HandleFunc("GET /api/settings", a.getSettings)
-	mux.HandleFunc("POST /api/settings", a.updateSettings)
 
 	return mux
 }

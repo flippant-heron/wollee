@@ -33,49 +33,23 @@ type App struct {
 	wakeLimiter        *RateLimiter
 }
 
+// registerRequest is the JSON body downstream agents POST to /register on
+// every heartbeat. This is a machine-to-machine endpoint (no browser/HTMX
+// involvement), so it stays JSON.
 type registerRequest struct {
 	MAC      string `json:"mac"`
 	Hostname string `json:"hostname"`
 	IP       string `json:"ip"`
 }
 
+// registerResponse mirrors agent.registerResponse's expected shape.
+type registerResponse struct {
+	HeartbeatInterval string `json:"heartbeatInterval"`
+}
+
 type wakeRequest struct {
 	MAC      string `json:"mac"`
 	Hostname string `json:"hostname"`
-}
-
-type statusResponse struct {
-	Hosts []hostStatus `json:"hosts"`
-}
-
-type hostStatus struct {
-	HostRecord
-	Active            bool   `json:"active"`
-	HeartbeatInterval string `json:"heartbeatInterval,omitempty"`
-}
-
-type serverSettingsRequest struct {
-	Network       string  `json:"network"`
-	Heartbeat     string  `json:"heartbeat"`
-	Timeout       string  `json:"timeout"`
-	ConfigRefresh string  `json:"configRefresh"`
-	Token         string  `json:"token"`
-	Users         []int64 `json:"users"`
-	Whoami        bool    `json:"whoami"`
-}
-
-type settingsUpdateRequest struct {
-	Settings serverSettingsRequest `json:"settings"`
-}
-
-type settingsResponse struct {
-	Network       string  `json:"network"`
-	Heartbeat     string  `json:"heartbeat"`
-	Timeout       string  `json:"timeout"`
-	ConfigRefresh string  `json:"configRefresh"`
-	TokenSet      bool    `json:"tokenSet"`
-	Users         []int64 `json:"users"`
-	Whoami        bool    `json:"whoami"`
 }
 
 func New(cfgMgr *config.Manager, registry *Registry, logger *appservice.Logger, logo config.LogoConfig) (*App, error) {

@@ -145,6 +145,66 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 	renderHTML(w, templates.StatusTableRows(hosts))
 }
 
+// handleRegister accepts heartbeats from downstream agents (see
+// internal/agent). Unlike the UI handlers this stays JSON in both
+// directions: agents are not browsers and can't consume HTMX/HTML fragments.
+func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req registerRequest
+	if err := a.decodeJSON(r, &req); err != nil {
+		a.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	mac, err := internalwol.NormalizeMAC(req.MAC)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid MAC address")
+		return
+	}
+
+	hostname := strings.TrimSpace(req.Hostname)
+	if hostname == "" {
+		hostname = mac
+	}
+
+	ip := net.ParseIP(strings.TrimSpace(req.IP))
+	if ip == nil || ip.To4() == nil {
+		a.writeError(w, http.StatusBadRequest, "invalid IPv4 address")
+		return
+	}
+
+	// Preserve an existing disabled flag so a heartbeat can't silently
+	// re-enable a host an admin disabled from the UI.
+	var disabled bool
+	if existing, ok := a.registry.FindByMAC(mac); ok {
+		disabled = existing.Disabled
+	}
+
+	host := HostRecord{
+		MAC:      mac,
+		Hostname: hostname,
+		IP:       ip.String(),
+		LastSeen: time.Now(),
+		Disabled: disabled,
+	}
+	if err := a.registry.Upsert(host); err != nil {
+		a.logger.Error("persist host registration", err, "mac", mac)
+		a.writeError(w, http.StatusInternalServerError, "failed to store host")
+		return
+	}
+
+	a.logger.Info("host registered", "mac", host.MAC, "hostname", host.Hostname, "ip", host.IP)
+
+	cfg := a.cfgMgr.Get()
+	a.writeJSON(w, http.StatusOK, registerResponse{
+		HeartbeatInterval: cfg.Heartbeat.String(),
+	})
+}
+
 func (a *App) resolveWakeTarget(req wakeRequest) (HostRecord, error) {
 	if req.MAC != "" {
 		mac, err := internalwol.NormalizeMAC(req.MAC)
@@ -432,17 +492,6 @@ func (a *App) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	renderHTML(w, templates.SettingsFullPage(&cfg, a.logoDataURI))
 }
 
-func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		a.getSettings(w, r)
-	case http.MethodPost:
-		a.updateSettings(w, r)
-	default:
-		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
 func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -580,161 +629,6 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 	)
 
 	renderHTMLStatus(w, http.StatusOK, templates.SettingsUpdated())
-}
-
-func (a *App) getSettings(w http.ResponseWriter, r *http.Request) {
-	cfg := a.cfgMgr.Get()
-	response := settingsResponse{
-		Network:       cfg.Network,
-		Heartbeat:     cfg.Heartbeat.String(),
-		Timeout:       cfg.Timeout.String(),
-		ConfigRefresh: cfg.ConfigRefresh.String(),
-		TokenSet:      cfg.Token != "",
-		Users:         cfg.Users,
-		Whoami:        cfg.Whoami,
-	}
-	a.writeJSON(w, http.StatusOK, response)
-}
-
-func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
-	var req settingsUpdateRequest
-	if err := a.decodeJSON(r, &req); err != nil {
-		a.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Validate and update settings
-	cfg := a.cfgMgr.Get()
-
-	// Save original config values before modification
-	oldToken := cfg.Token
-	oldUsers := make([]int64, len(cfg.Users))
-	copy(oldUsers, cfg.Users)
-	oldWhoami := cfg.Whoami
-
-	if err := internalwol.ValidateBroadcast(req.Settings.Network); err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid network: "+err.Error())
-		return
-	}
-
-	timeout, err := time.ParseDuration(req.Settings.Timeout)
-	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid timeout: "+err.Error())
-		return
-	}
-	if timeout <= 0 {
-		a.writeError(w, http.StatusBadRequest, "timeout must be greater than 0")
-		return
-	}
-
-	heartbeat, err := time.ParseDuration(req.Settings.Heartbeat)
-	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid heartbeat: "+err.Error())
-		return
-	}
-	if heartbeat <= 0 {
-		a.writeError(w, http.StatusBadRequest, "heartbeat must be greater than 0")
-		return
-	}
-
-	cfgRefresh, err := time.ParseDuration(req.Settings.ConfigRefresh)
-	if err != nil {
-		a.writeError(w, http.StatusBadRequest, "invalid configRefresh: "+err.Error())
-		return
-	}
-	if cfgRefresh <= 0 {
-		a.writeError(w, http.StatusBadRequest, "configRefresh must be greater than 0")
-		return
-	}
-
-	// Handle token - only allow setting it once
-	newToken := req.Settings.Token
-	if cfg.Token != "" && newToken != "" {
-		// Token is already set and user is trying to change it - not allowed
-		a.writeError(w, http.StatusForbidden, "token is already configured and cannot be changed via API")
-		return
-	}
-
-	// Update config (port remains unchanged - requires server restart)
-	cfg.Network = req.Settings.Network
-	cfg.Timeout = timeout
-	cfg.Heartbeat = heartbeat
-	cfg.ConfigRefresh = cfgRefresh
-	cfg.Whoami = req.Settings.Whoami
-	if newToken != "" {
-		cfg.Token = newToken
-	}
-	cfg.Users = req.Settings.Users
-
-	if err := a.cfgMgr.Update(cfg); err != nil {
-		a.logger.Error("update config", err)
-		a.writeError(w, http.StatusInternalServerError, "failed to update config: "+err.Error())
-		return
-	}
-
-	// Immediately reload config from disk to verify persistence and ensure consistency
-	if err := a.cfgMgr.Reload(); err != nil {
-		a.logger.Error("reload config after update", err)
-		a.writeError(w, http.StatusInternalServerError, "settings saved but verification failed: "+err.Error())
-		return
-	}
-
-	// Get the freshly loaded config to verify all changes were persisted
-	verifiedCfg := a.cfgMgr.Get()
-
-	// Restart telegram service if any relevant settings changed
-	usersChanged := !eqInt64Slices(oldUsers, verifiedCfg.Users)
-	tokenChanged := oldToken != verifiedCfg.Token
-	whoamiChanged := oldWhoami != verifiedCfg.Whoami
-
-	if tokenChanged || usersChanged || whoamiChanged {
-		if verifiedCfg.Token != "" {
-			// Token is set - restart with new config
-			if a.telegramCancel != nil {
-				a.telegramCancel()
-			}
-			if a.telegram != nil {
-				a.telegram.Shutdown()
-			}
-			a.telegram = telegram.New(verifiedCfg.Token, verifiedCfg.Users, a, a.logger, verifiedCfg.Whoami)
-			a.telegramCtx, a.telegramCancel = context.WithCancel(context.Background())
-			if err := a.telegram.Start(a.telegramCtx); err != nil {
-				a.logger.Error("start telegram service after settings change", err)
-			}
-		} else {
-			// Token was cleared - stop telegram service
-			if a.telegramCancel != nil {
-				a.telegramCancel()
-			}
-			if a.telegram != nil {
-				a.telegram.Shutdown()
-			}
-		}
-	}
-
-	a.logger.Info("settings updated and verified successfully",
-		"tokenChanged", tokenChanged,
-		"usersChanged", usersChanged,
-		"whoamiChanged", whoamiChanged,
-		"network", verifiedCfg.Network,
-		"heartbeat", verifiedCfg.Heartbeat,
-		"timeout", verifiedCfg.Timeout,
-		"configRefresh", verifiedCfg.ConfigRefresh,
-		"whoami", verifiedCfg.Whoami,
-		"usersCount", len(verifiedCfg.Users),
-		"tokenSet", verifiedCfg.Token != "",
-	)
-
-	response := settingsResponse{
-		Network:       verifiedCfg.Network,
-		Heartbeat:     verifiedCfg.Heartbeat.String(),
-		Timeout:       verifiedCfg.Timeout.String(),
-		ConfigRefresh: verifiedCfg.ConfigRefresh.String(),
-		TokenSet:      verifiedCfg.Token != "",
-		Users:         verifiedCfg.Users,
-		Whoami:        verifiedCfg.Whoami,
-	}
-	a.writeJSON(w, http.StatusOK, response)
 }
 
 // Auth-related request/response types

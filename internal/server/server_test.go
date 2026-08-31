@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ func TestTelegramListIncludesHosts(t *testing.T) {
 	}
 }
 
-func TestGetSettingsReturnsCurrentConfig(t *testing.T) {
+func TestSettingsPageFragmentShowsCurrentConfig(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.ServerConfig{
@@ -59,29 +60,21 @@ func TestGetSettingsReturnsCurrentConfig(t *testing.T) {
 		logger:   appservice.NewLogger(true),
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	req.Header.Set("HX-Request", "true")
 	resp := httptest.NewRecorder()
 
-	app.getSettings(resp, req)
+	app.handleSettingsPage(resp, req)
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.Code, http.StatusOK)
 	}
-
-	var payload settingsResponse
-	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	if payload.Network != "192.168.1.0/24" {
-		t.Fatalf("Network = %q, want 192.168.1.0/24", payload.Network)
-	}
-	if payload.TokenSet {
-		t.Fatal("TokenSet = true, want false")
+	if !bytes.Contains(resp.Body.Bytes(), []byte("192.168.1.0/24")) {
+		t.Fatal("response missing configured network")
 	}
 }
 
-func TestUpdateSettingsPreventsTelegramTokenOverwrite(t *testing.T) {
+func TestUpdateSettingsFormPreventsTelegramTokenOverwrite(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -122,19 +115,18 @@ hosts: []
 	}
 
 	// Try to update token
-	updatePayload := serverSettingsRequest{
-		Network:       "192.168.2.0/24",
-		Heartbeat:     "30s",
-		Timeout:       "5m",
-		ConfigRefresh: "5m",
-		Token:         "new-token",
-		Users:         []int64{456},
+	form := url.Values{
+		"network":       {"192.168.2.0/24"},
+		"heartbeat":     {"30s"},
+		"timeout":       {"5m"},
+		"configRefresh": {"5m"},
+		"telegramToken": {"new-token"},
 	}
-	body, _ := json.Marshal(settingsUpdateRequest{Settings: updatePayload})
-	req := httptest.NewRequest(http.MethodPost, "/api/settings", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp := httptest.NewRecorder()
 
-	app.updateSettings(resp, req)
+	app.handleUpdateSettingsForm(resp, req)
 
 	// Should be forbidden
 	if resp.Code != http.StatusForbidden {
@@ -147,7 +139,7 @@ hosts: []
 	}
 }
 
-func TestUpdateSettingsAllowsTokenOnlyOnce(t *testing.T) {
+func TestUpdateSettingsFormAllowsTokenOnlyOnce(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -185,19 +177,18 @@ hosts: []
 	}
 
 	// Set token for the first time
-	updatePayload := serverSettingsRequest{
-		Network:       "192.168.1.0/24",
-		Heartbeat:     "30s",
-		Timeout:       "5m",
-		ConfigRefresh: "5m",
-		Token:         "new-token",
-		Users:         []int64{123},
+	form := url.Values{
+		"network":       {"192.168.1.0/24"},
+		"heartbeat":     {"30s"},
+		"timeout":       {"5m"},
+		"configRefresh": {"5m"},
+		"telegramToken": {"new-token"},
 	}
-	body, _ := json.Marshal(settingsUpdateRequest{Settings: updatePayload})
-	req := httptest.NewRequest(http.MethodPost, "/api/settings", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp := httptest.NewRecorder()
 
-	app.updateSettings(resp, req)
+	app.handleUpdateSettingsForm(resp, req)
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("first token set status = %d, want %d", resp.Code, http.StatusOK)
@@ -279,6 +270,101 @@ func TestStatusTableReturnsHTMLFragment(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(body), []byte("disabled")) {
 		t.Fatal("response missing 'disabled' class for disabled host")
+	}
+}
+
+func TestHandleRegisterUpsertsHostAndReturnsHeartbeatInterval(t *testing.T) {
+	t.Parallel()
+
+	registry, err := OpenRegistry(filepath.Join(t.TempDir(), "hosts.yaml"))
+	if err != nil {
+		t.Fatalf("OpenRegistry() error = %v", err)
+	}
+
+	cfgMgr := config.NewManager("", config.ServerConfig{Heartbeat: 45 * time.Second})
+	app := &App{
+		cfgMgr:   cfgMgr,
+		registry: registry,
+		logger:   appservice.NewLogger(true),
+	}
+
+	body, _ := json.Marshal(registerRequest{
+		MAC:      "00:11:22:33:44:55",
+		Hostname: "desk",
+		IP:       "192.168.1.10",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+
+	app.handleRegister(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", resp.Code, http.StatusOK, resp.Body.String())
+	}
+
+	var payload registerResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.HeartbeatInterval != "45s" {
+		t.Fatalf("HeartbeatInterval = %q, want 45s", payload.HeartbeatInterval)
+	}
+
+	host, ok := registry.FindByMAC("00:11:22:33:44:55")
+	if !ok {
+		t.Fatal("host was not persisted to the registry")
+	}
+	if host.Hostname != "desk" || host.IP != "192.168.1.10" {
+		t.Fatalf("unexpected host record: %+v", host)
+	}
+}
+
+func TestHandleRegisterPreservesDisabledFlag(t *testing.T) {
+	t.Parallel()
+
+	registry, err := OpenRegistry(filepath.Join(t.TempDir(), "hosts.yaml"))
+	if err != nil {
+		t.Fatalf("OpenRegistry() error = %v", err)
+	}
+	if err := registry.Upsert(HostRecord{
+		MAC:      "00:11:22:33:44:55",
+		Hostname: "desk",
+		IP:       "192.168.1.10",
+		Disabled: true,
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+
+	cfgMgr := config.NewManager("", config.ServerConfig{Heartbeat: 30 * time.Second})
+	app := &App{
+		cfgMgr:   cfgMgr,
+		registry: registry,
+		logger:   appservice.NewLogger(true),
+	}
+
+	body, _ := json.Marshal(registerRequest{
+		MAC:      "00:11:22:33:44:55",
+		Hostname: "desk",
+		IP:       "192.168.1.20",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+
+	app.handleRegister(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", resp.Code, http.StatusOK, resp.Body.String())
+	}
+
+	host, ok := registry.FindByMAC("00:11:22:33:44:55")
+	if !ok {
+		t.Fatal("host missing after heartbeat")
+	}
+	if !host.Disabled {
+		t.Fatal("heartbeat should not clear the disabled flag")
+	}
+	if host.IP != "192.168.1.20" {
+		t.Fatalf("IP = %q, want updated 192.168.1.20", host.IP)
 	}
 }
 
