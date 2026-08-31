@@ -1,8 +1,9 @@
 module github.com/flippant-heron/wollee
 
-go 1.25.0
+go 1.25.12
 
 require (
+	github.com/a-h/templ v0.3.1020
 	github.com/ahiggins0/go-wol v0.0.1
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/golang-jwt/jwt/v5 v5.3.1

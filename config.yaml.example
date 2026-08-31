@@ -18,3 +18,19 @@ server:
   # Optional: Allow unauthenticated /whoami command (default: true)
   # Set to false after configuring users to require authentication for /whoami
   whoami: true
+
+logo:
+  # Preferred: filename of an image already placed in web/static/ (rebuild
+  # after adding it). Served at /static/<path>. Ignored if base64 is set.
+  path: logo.png
+  # Alternative: raw base64-encoded image bytes, embedded directly here.
+  # Useful when you do not want to rebuild the binary. Takes precedence
+  # over path if both are set.
+  # base64: iVBORw0KGgo...
+  # Optional: how the logo is cropped down to a 32x32 favicon. One of:
+  #   resize-left   (default) fit height to 32px, crop width from the left
+  #   resize-right  fit height to 32px, crop width from the right
+  #   resize-top    fit width to 32px, crop height from the top
+  #   resize-bottom fit width to 32px, crop height from the bottom
+  #   resize        stretch both dimensions to 32x32 (ignores aspect ratio)
+  # faviconMode: resize-left

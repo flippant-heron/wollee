@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/flippant-heron/wollee/internal/auth"
+	"github.com/flippant-heron/wollee/internal/server/templates"
 )
 
 func (a *App) newRouter() http.Handler {
@@ -22,9 +23,7 @@ func (rm *routerMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Try to authenticate
 		if !rm.isAuthenticated(r) {
 			// Not authenticated - serve login page
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusUnauthorized)
-			if _, err := w.Write(rm.app.loginHTML); err != nil {
+			if err := renderHTMLStatus(w, http.StatusUnauthorized, templates.LoginPage(rm.app.logoDataURI)); err != nil {
 				rm.app.logger.Error("write login response", err)
 			}
 			return
@@ -35,9 +34,7 @@ func (rm *routerMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Root path requires authentication
 		if !rm.isAuthenticated(r) {
 			// Not authenticated - serve login page
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusUnauthorized)
-			if _, err := w.Write(rm.app.loginHTML); err != nil {
+			if err := renderHTMLStatus(w, http.StatusUnauthorized, templates.LoginPage(rm.app.logoDataURI)); err != nil {
 				rm.app.logger.Error("write login response", err)
 			}
 			return
@@ -58,10 +55,11 @@ func (rm *routerMiddleware) isProtectedPath(path string) bool {
 		"/status",
 		"/config/reload",
 		"/hosts",
-		"/api/settings",
 	}
 	for _, prefix := range protectedPrefixes {
-		if path == prefix || (prefix[len(prefix)-1] == '/' && len(path) > len(prefix) && path[:len(prefix)] == prefix) {
+		// Match the prefix itself or any sub-path of it (e.g. "/hosts/{mac}",
+		// "/status/table"), not just an exact string match.
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
 	}
@@ -107,26 +105,26 @@ func (a *App) createMux() *http.ServeMux {
 	mux.HandleFunc("/auth/login", a.handleLogin)
 	mux.HandleFunc("/auth/setup", a.handleSetupPassword)
 	mux.HandleFunc("/auth/logout", a.handleLogout)
+	mux.HandleFunc("/favicon.ico", a.handleFavicon)
+	// Downstream agent heartbeats - machine-to-machine, no JWT cookie/session.
+	mux.Handle("/register", a.RateLimitMiddleware(a.registerLimiter)(http.HandlerFunc(a.handleRegister)))
 
 	// Protected auth endpoints
 	mux.HandleFunc("/auth/change-password", a.handleChangePassword)
 
-	// Rate-limited public endpoints (agent heartbeat)
-	mux.Handle("/register", a.RateLimitMiddleware(a.registerLimiter)(http.HandlerFunc(a.handleRegister)))
-
 	// Protected endpoints (auth required)
 	mux.HandleFunc("/", a.handleIndex)
 	mux.HandleFunc("/add-host", a.handleAddHostPage)
-	mux.HandleFunc("/settings", a.handleSettingsPage)
+	mux.HandleFunc("GET /settings", a.handleSettingsPage)
+	mux.HandleFunc("POST /settings", a.handleUpdateSettingsForm)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(a.staticFS))))
 	mux.Handle("/wake", a.RateLimitMiddleware(a.wakeLimiter)(http.HandlerFunc(a.handleWake)))
-	mux.HandleFunc("/status", a.handleStatus)
+	mux.HandleFunc("/status/table", a.handleStatusTable)
 	mux.HandleFunc("/config/reload", a.handleConfigReload)
-	mux.HandleFunc("/hosts", a.handleAddHost)
+	mux.HandleFunc("POST /add-host", a.handleAddHost)
 	mux.HandleFunc("DELETE /hosts/{mac}", a.handleDeleteHost)
 	mux.HandleFunc("PATCH /hosts/{mac}/disable", a.handleDisableHost)
 	mux.HandleFunc("PATCH /hosts/{mac}/enable", a.handleEnableHost)
-	mux.HandleFunc("/api/settings", a.handleSettings)
 
 	return mux
 }

@@ -1,0 +1,149 @@
+package templates
+
+import (
+	"time"
+	"fmt"
+)
+
+type HostStatus struct {
+	MAC               string
+	Hostname          string
+	IP                string
+	LastSeen          time.Time
+	Disabled          bool
+	Active            bool
+	HeartbeatInterval string
+}
+
+templ StatusTableRows(hosts []HostStatus) {
+	if len(hosts) == 0 {
+		<tr>
+			<td colspan="8">No hosts registered yet.</td>
+		</tr>
+	} else {
+		for _, host := range hosts {
+			@HostRow(host)
+		}
+	}
+}
+
+templ HostRow(host HostStatus) {
+	<tr class={ "disabled", host.Disabled }>
+		<td style="text-align: center;">
+			<button
+				type="button"
+				hx-post="/wake"
+				hx-target="#status-table"
+				hx-vals={ fmt.Sprintf(`{"mac":"%s"}`, host.MAC) }
+				title="Send wake-on-LAN packet to this host"
+			>
+				<span class="material-symbols-outlined sm">power_settings_new</span>
+			</button>
+		</td>
+
+		<td style="text-align: center;">
+			<span class={ "status-dot", statusClass(host) }></span>
+		</td>
+
+		<td>
+			{ statusText(host) }
+		</td>
+
+		<td>{ host.Hostname }</td>
+
+		<td><code>{ host.MAC }</code></td>
+
+		<td>{ host.IP }</td>
+
+		<td>{ host.LastSeen.Format(time.DateTime) }</td>
+
+		<td style="text-align: center; display: flex; gap: 0.25rem; justify-content: center;">
+			if host.Disabled {
+				<button
+					type="button"
+					hx-patch={ fmt.Sprintf("/hosts/%s/enable", host.MAC) }
+					hx-target="#status-table"
+					title="Enable this host"
+				>
+					<span class="material-symbols-outlined sm">visibility_off</span>
+				</button>
+			} else {
+				<button
+					type="button"
+					hx-patch={ fmt.Sprintf("/hosts/%s/disable", host.MAC) }
+					hx-target="#status-table"
+					title="Disable this host"
+				>
+					<span class="material-symbols-outlined sm">visibility</span>
+				</button>
+			}
+
+			<button
+				type="button"
+				hx-delete={ fmt.Sprintf("/hosts/%s", host.MAC) }
+				hx-target="#status-table"
+				hx-confirm={ fmt.Sprintf("Are you sure you want to delete %s?", host.Hostname) }
+				title="Delete this host"
+			>
+				<span class="material-symbols-outlined sm">delete</span>
+			</button>
+		</td>
+	</tr>
+}
+
+templ ErrorRow(message string) {
+	<tr>
+		<td colspan="8" style="color: red;">{ message }</td>
+	</tr>
+}
+
+func statusClass(host HostStatus) string {
+	if host.Disabled {
+		return "status-disabled"
+	}
+	if host.Active {
+		return "status-online"
+	}
+	return "status-offline"
+}
+
+func statusText(host HostStatus) string {
+	if host.Disabled {
+		return "Disabled"
+	}
+	if host.Active {
+		return "Online"
+	}
+	return "Offline"
+}
+
+templ IndexPage(logoDataURI string) {
+	@Layout("Home", logoDataURI) {
+		@HomePage()
+	}
+}
+
+templ HomePage() {
+	<header>
+		<h1>Devices</h1>
+		<p>Registered clients appear below with their most recent heartbeat.</p>
+	</header>
+
+	<figure style="overflow-x:auto;">
+		<table>
+			<thead>
+				<tr>
+					<th title="Wake" style="text-align: center; width: 3rem;"><span class="material-symbols-outlined xs">power_settings_new</span></th>
+					<th style="text-align: center; width: 1.5rem;"></th>
+					<th>Status</th>
+					<th>Hostname</th>
+					<th>MAC</th>
+					<th>IP</th>
+					<th>Last seen</th>
+					<th title="Actions" style="text-align: center; width: 7rem;">Actions</th>
+				</tr>
+			</thead>
+			<tbody id="status-table" hx-trigger="load, statusRefresh from:body" hx-get="/status/table" hx-swap="innerHTML"></tbody>
+		</table>
+	</figure>
+}

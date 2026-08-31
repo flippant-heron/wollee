@@ -103,7 +103,7 @@ func buildServerService(configPath string) (*serverRuntime, error) {
 	// Create config manager for hot-reload
 	cfgMgr := config.NewManager(cfg.SourcePath, cfg.Server)
 
-	runner, err := server.New(cfgMgr, registry, logger)
+	runner, err := server.New(cfgMgr, registry, logger, cfg.Logo)
 	if err != nil {
 		return nil, err
 	}

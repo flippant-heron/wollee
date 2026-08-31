@@ -20,6 +20,20 @@ type Config struct {
 	SourcePath string
 	Server     ServerConfig
 	Hosts      []HostConfig
+	Logo       LogoConfig
+}
+
+// LogoConfig configures an optional nav-bar logo. Base64 takes precedence
+// over Path; if neither resolves to a usable image, the app falls back to
+// showing the "wollee" text brand. Path is a filename relative to the
+// embedded web/static assets (served at /static/), not a filesystem path.
+// FaviconMode controls how the logo is cropped down to favicon size; see
+// server.generateFavicon for the supported values. An empty value uses the
+// default ("resize-left").
+type LogoConfig struct {
+	Base64      string
+	Path        string
+	FaviconMode string `mapstructure:"faviconMode"`
 }
 
 type ServerConfig struct {
@@ -43,6 +57,7 @@ type HostConfig struct {
 type rawConfig struct {
 	Server rawServerConfig `mapstructure:"server"`
 	Hosts  []HostConfig    `mapstructure:"hosts"`
+	Logo   LogoConfig      `mapstructure:"logo"`
 }
 
 type rawServerConfig struct {
@@ -123,6 +138,7 @@ func Load(path string) (Config, error) {
 			JWTSecret:     getOrGenerateJWTSecret(raw.Server.JWTSecret),
 		},
 		Hosts: raw.Hosts,
+		Logo:  raw.Logo,
 	}, nil
 }
 

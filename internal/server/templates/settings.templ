@@ -1,0 +1,111 @@
+package templates
+
+import (
+	"github.com/flippant-heron/wollee/internal/config"
+	"fmt"
+	"strings"
+)
+
+func formatUsers(users []int64) string {
+	var strs []string
+	for _, u := range users {
+		strs = append(strs, fmt.Sprintf("%d", u))
+	}
+	return strings.Join(strs, ", ")
+}
+
+templ SettingsFullPage(cfg *config.ServerConfig, logoDataURI string) {
+	@Layout("Settings", logoDataURI) {
+		@SettingsPage(cfg)
+	}
+}
+
+templ SettingsPage(cfg *config.ServerConfig) {
+	<header>
+		<h1>Settings</h1>
+		<p>Configure server behavior and integrations.</p>
+	</header>
+
+	<div id="settings-result"></div>
+
+	@SettingsForm(cfg, "")
+}
+
+templ SettingsForm(cfg *config.ServerConfig, errorMsg string) {
+	<form hx-post="/settings" hx-target="this" hx-swap="outerHTML">
+		if errorMsg != "" {
+			<div class="error-message" style="margin-bottom: 1rem;">
+				<strong>Error:</strong> { errorMsg }
+			</div>
+		}
+		
+		<fieldset>
+			<legend>Network</legend>
+			<div>
+				<label for="network">Broadcast Address (CIDR)</label>
+				<input id="network" type="text" name="network" value={ cfg.Network } placeholder="192.168.1.0/24" required>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend>Heartbeat Monitoring</legend>
+			<div>
+				<label for="heartbeat">Heartbeat Interval</label>
+				<input id="heartbeat" type="text" name="heartbeat" value={ cfg.Heartbeat.String() } placeholder="30s" required>
+			</div>
+			<div>
+				<label for="timeout">Timeout</label>
+				<input id="timeout" type="text" name="timeout" value={ cfg.Timeout.String() } placeholder="5m" required>
+			</div>
+			<div>
+				<label for="configRefresh">Config Refresh Interval</label>
+				<input id="configRefresh" type="text" name="configRefresh" value={ cfg.ConfigRefresh.String() } placeholder="5m" required>
+			</div>
+			<div>
+				<label for="whoami">
+					<input id="whoami" type="checkbox" name="whoami" checked?={ cfg.Whoami }>
+					Enable /whoami endpoint
+				</label>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend>Telegram Bot</legend>
+			<div>
+				<label for="telegramToken">Bot Token</label>
+				if cfg.Token != "" {
+					<input id="telegramToken" type="password" name="telegramToken" placeholder="Leave empty to keep current token">
+					<p style="font-size: 0.9em; color: var(--text-secondary, #666);">Token is currently configured. Leave empty to keep it.</p>
+				} else {
+					<input id="telegramToken" type="password" name="telegramToken" placeholder="Enter your Telegram bot token" required>
+				}
+			</div>
+			<div>
+				<label for="telegramUsers">Authorized User IDs (comma-separated)</label>
+				<textarea id="telegramUsers" name="telegramUsers" placeholder="e.g., 123456789, 987654321" style="min-height: 60px;">{ formatUsers(cfg.Users) }</textarea>
+			</div>
+		</fieldset>
+
+		<div style="display: flex; gap: 1rem;">
+			<button type="submit">
+				<span class="material-symbols-outlined sm">save</span>
+				Save Settings
+			</button>
+			<button type="button" hx-get="/" hx-target="#article-content" hx-swap="innerHTML" style="background-color: var(--button-secondary, #e0e0e0);">
+				<span class="material-symbols-outlined sm">cancel</span>
+				Cancel
+			</button>
+		</div>
+	</form>
+}
+
+templ SettingsUpdated() {
+	<div class="success-message">
+		<strong>Success!</strong> Settings saved successfully.
+		<script>showToast('Settings saved', 2000, 'success')</script>
+	</div>
+}
+
+templ SettingsError(message string, cfg *config.ServerConfig) {
+	@SettingsForm(cfg, message)
+}
