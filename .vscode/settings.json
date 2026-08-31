@@ -1,4 +1,5 @@
 {
+	"editor.tabSize": 2,
 	"yaml.schemas": {
 		"https://json.schemastore.org/taskfile.json": "tasks/*.taskfile.yml"
 	}

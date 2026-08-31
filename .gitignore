@@ -1,3 +1,4 @@
+.DS_Store
 config.yaml
 web/static/*
 !web/static/logo.png
