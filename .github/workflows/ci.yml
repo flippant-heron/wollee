@@ -18,6 +18,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go mod download
+      - run: go run github.com/a-h/templ/cmd/templ@latest generate
       - run: go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run --timeout=5m --enable=errcheck --enable=unused
 
   test:
@@ -28,6 +29,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go mod download
+      - run: go run github.com/a-h/templ/cmd/templ@latest generate
       - run: go test ./...
 
   build-release:
@@ -40,6 +42,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go mod download
+      - run: go run github.com/a-h/templ/cmd/templ@latest generate
       - run: go install github.com/go-task/task/v3/cmd/task@latest
       - run: "$(go env GOPATH)/bin/task assets:get"
       - run: "$(go env GOPATH)/bin/task build:all"
