@@ -17,9 +17,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: go-task/setup-task@v3
+        with:
+          version: 3.46.4
       - run: go mod download
-      - run: go run github.com/a-h/templ/cmd/templ@latest generate
-      - run: go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run --timeout=5m --enable=errcheck --enable=unused
+      - run: task build:templ:generate
+      - run: task lint
 
   test:
     runs-on: ubuntu-latest
@@ -28,9 +31,13 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: go-task/setup-task@v3
+        with:
+          version: 3.46.4
       - run: go mod download
-      - run: go run github.com/a-h/templ/cmd/templ@latest generate
-      - run: go test ./...
+      - run: task build:templ:generate
+      - run: task assets:get
+      - run: task test
 
   build-release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -41,11 +48,13 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: go-task/setup-task@v3
+        with:
+          version: 3.46.4
       - run: go mod download
-      - run: go run github.com/a-h/templ/cmd/templ@latest generate
-      - run: go install github.com/go-task/task/v3/cmd/task@latest
-      - run: "$(go env GOPATH)/bin/task assets:get"
-      - run: "$(go env GOPATH)/bin/task build:all"
+      - run: task build:templ:generate
+      - run: task assets:get
+      - run: task build:all
       - uses: actions/upload-artifact@v7
         with:
           name: release-binaries
