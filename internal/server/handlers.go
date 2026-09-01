@@ -64,7 +64,7 @@ func (a *App) handleFavicon(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", a.faviconContentType)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.Write(a.faviconData)
+	_, _ = w.Write(a.faviconData)
 }
 
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -75,12 +75,16 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	// If this is an HTMX request, return just the article content
 	if r.Header.Get("HX-Request") == "true" {
-		renderHTML(w, templates.HomePage())
+		if err := renderHTML(w, templates.HomePage()); err != nil {
+			a.logger.Error("render home page", err)
+		}
 		return
 	}
 
 	// Otherwise, return the full page
-	renderHTML(w, templates.IndexPage(a.logoDataURI))
+	if err := renderHTML(w, templates.IndexPage(a.logoDataURI)); err != nil {
+		a.logger.Error("render index page", err)
+	}
 }
 
 func (a *App) handleAddHostPage(w http.ResponseWriter, r *http.Request) {
@@ -90,11 +94,15 @@ func (a *App) handleAddHostPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Header.Get("HX-Request") == "true" {
-		renderHTML(w, templates.AddHostPage())
+		if err := renderHTML(w, templates.AddHostPage()); err != nil {
+			a.logger.Error("render add host page", err)
+		}
 		return
 	}
 
-	renderHTML(w, templates.AddHostFullPage(a.logoDataURI))
+	if err := renderHTML(w, templates.AddHostFullPage(a.logoDataURI)); err != nil {
+		a.logger.Error("render add host full page", err)
+	}
 }
 
 func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +112,9 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseForm(); err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("invalid form data"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("invalid form data")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
@@ -112,7 +122,9 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 	hostname := strings.TrimSpace(r.FormValue("hostname"))
 
 	if mac == "" && hostname == "" {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("hostname or mac is required"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("hostname or mac is required")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
@@ -123,26 +135,34 @@ func (a *App) handleWake(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errHostNotFound) {
 			status = http.StatusNotFound
 		}
-		renderHTMLStatus(w, status, templates.ErrorRow(err.Error()))
+		if renderErr := renderHTMLStatus(w, status, templates.ErrorRow(err.Error())); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	if host.Disabled {
-		renderHTMLStatus(w, http.StatusForbidden, templates.ErrorRow("Host is disabled"))
+		if renderErr := renderHTMLStatus(w, http.StatusForbidden, templates.ErrorRow("Host is disabled")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	cfg := a.cfgMgr.Get()
 	if err := internalwol.SendMagicPacket(host.MAC, cfg.Network); err != nil {
 		a.logger.Error("send magic packet", err, "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
-		renderHTMLStatus(w, http.StatusBadGateway, templates.ErrorRow("Failed to send magic packet"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadGateway, templates.ErrorRow("Failed to send magic packet")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	a.logger.Info("sent magic packet", "mac", host.MAC, "hostname", host.Hostname, "broadcast", cfg.Network)
 
 	hosts := a.getHostStatuses()
-	renderHTML(w, templates.StatusTableRows(hosts))
+	if err := renderHTML(w, templates.StatusTableRows(hosts)); err != nil {
+		a.logger.Error("render status table rows", err)
+	}
 }
 
 // handleRegister accepts heartbeats from downstream agents (see
@@ -296,7 +316,9 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseForm(); err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.AddHostError("invalid form data"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.AddHostError("invalid form data")); renderErr != nil {
+			a.logger.Error("render add host error", renderErr)
+		}
 		return
 	}
 
@@ -306,7 +328,9 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 
 	mac, err := internalwol.NormalizeMAC(macStr)
 	if err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.AddHostError("invalid MAC address"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.AddHostError("invalid MAC address")); renderErr != nil {
+			a.logger.Error("render add host error", renderErr)
+		}
 		return
 	}
 
@@ -316,7 +340,9 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 
 	ip := net.ParseIP(ipStr)
 	if ip == nil || ip.To4() == nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.AddHostError("invalid IPv4 address"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.AddHostError("invalid IPv4 address")); renderErr != nil {
+			a.logger.Error("render add host error", renderErr)
+		}
 		return
 	}
 
@@ -328,13 +354,17 @@ func (a *App) handleAddHost(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("persist host addition", err, "mac", mac)
-		renderHTMLStatus(w, http.StatusInternalServerError, templates.AddHostError("failed to store host"))
+		if renderErr := renderHTMLStatus(w, http.StatusInternalServerError, templates.AddHostError("failed to store host")); renderErr != nil {
+			a.logger.Error("render add host error", renderErr)
+		}
 		return
 	}
 
 	a.logger.Info("added host", "mac", host.MAC, "hostname", host.Hostname, "ip", host.IP)
 
-	renderHTMLStatus(w, http.StatusOK, templates.AddHostSuccess(hostname))
+	if err := renderHTMLStatus(w, http.StatusOK, templates.AddHostSuccess(hostname)); err != nil {
+		a.logger.Error("render add host success", err)
+	}
 }
 
 func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
@@ -345,31 +375,41 @@ func (a *App) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
 
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("MAC address is required"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("MAC address is required")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("Invalid MAC address"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("Invalid MAC address")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	if _, ok := a.registry.FindByMAC(normalized); !ok {
-		renderHTMLStatus(w, http.StatusNotFound, templates.ErrorRow("Host not found"))
+		if renderErr := renderHTMLStatus(w, http.StatusNotFound, templates.ErrorRow("Host not found")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	if err := a.registry.Delete(normalized); err != nil {
 		a.logger.Error("delete host", err, "mac", normalized)
-		renderHTMLStatus(w, http.StatusInternalServerError, templates.ErrorRow("Failed to delete host"))
+		if renderErr := renderHTMLStatus(w, http.StatusInternalServerError, templates.ErrorRow("Failed to delete host")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	a.logger.Info("deleted host", "mac", normalized)
 
 	hosts := a.getHostStatuses()
-	renderHTML(w, templates.StatusTableRows(hosts))
+	if err := renderHTML(w, templates.StatusTableRows(hosts)); err != nil {
+		a.logger.Error("render status table rows", err)
+	}
 }
 
 func (a *App) handleDisableHost(w http.ResponseWriter, r *http.Request) {
@@ -380,39 +420,51 @@ func (a *App) handleDisableHost(w http.ResponseWriter, r *http.Request) {
 
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("MAC address is required"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("MAC address is required")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("Invalid MAC address"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("Invalid MAC address")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	host, ok := a.registry.FindByMAC(normalized)
 	if !ok {
-		renderHTMLStatus(w, http.StatusNotFound, templates.ErrorRow("Host not found"))
+		if renderErr := renderHTMLStatus(w, http.StatusNotFound, templates.ErrorRow("Host not found")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	if host.Disabled {
 		hosts := a.getHostStatuses()
-		renderHTML(w, templates.StatusTableRows(hosts))
+		if err := renderHTML(w, templates.StatusTableRows(hosts)); err != nil {
+			a.logger.Error("render status table rows", err)
+		}
 		return
 	}
 
 	host.Disabled = true
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("disable host", err, "mac", normalized)
-		renderHTMLStatus(w, http.StatusInternalServerError, templates.ErrorRow("Failed to disable host"))
+		if renderErr := renderHTMLStatus(w, http.StatusInternalServerError, templates.ErrorRow("Failed to disable host")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	a.logger.Info("disabled host", "mac", normalized)
 
 	hosts := a.getHostStatuses()
-	renderHTML(w, templates.StatusTableRows(hosts))
+	if err := renderHTML(w, templates.StatusTableRows(hosts)); err != nil {
+		a.logger.Error("render status table rows", err)
+	}
 }
 
 func (a *App) handleEnableHost(w http.ResponseWriter, r *http.Request) {
@@ -423,39 +475,51 @@ func (a *App) handleEnableHost(w http.ResponseWriter, r *http.Request) {
 
 	mac := strings.TrimSpace(r.PathValue("mac"))
 	if mac == "" {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("MAC address is required"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("MAC address is required")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	normalized, err := internalwol.NormalizeMAC(mac)
 	if err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("Invalid MAC address"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("Invalid MAC address")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	host, ok := a.registry.FindByMAC(normalized)
 	if !ok {
-		renderHTMLStatus(w, http.StatusNotFound, templates.ErrorRow("Host not found"))
+		if renderErr := renderHTMLStatus(w, http.StatusNotFound, templates.ErrorRow("Host not found")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	if !host.Disabled {
 		hosts := a.getHostStatuses()
-		renderHTML(w, templates.StatusTableRows(hosts))
+		if err := renderHTML(w, templates.StatusTableRows(hosts)); err != nil {
+			a.logger.Error("render status table rows", err)
+		}
 		return
 	}
 
 	host.Disabled = false
 	if err := a.registry.Upsert(host); err != nil {
 		a.logger.Error("enable host", err, "mac", normalized)
-		renderHTMLStatus(w, http.StatusInternalServerError, templates.ErrorRow("Failed to enable host"))
+		if renderErr := renderHTMLStatus(w, http.StatusInternalServerError, templates.ErrorRow("Failed to enable host")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
 	a.logger.Info("enabled host", "mac", normalized)
 
 	hosts := a.getHostStatuses()
-	renderHTML(w, templates.StatusTableRows(hosts))
+	if err := renderHTML(w, templates.StatusTableRows(hosts)); err != nil {
+		a.logger.Error("render status table rows", err)
+	}
 }
 
 func (a *App) handleConfigReload(w http.ResponseWriter, r *http.Request) {
@@ -485,11 +549,15 @@ func (a *App) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 
 	cfg := a.cfgMgr.Get()
 	if r.Header.Get("HX-Request") == "true" {
-		renderHTML(w, templates.SettingsPage(&cfg))
+		if err := renderHTML(w, templates.SettingsPage(&cfg)); err != nil {
+			a.logger.Error("render settings page", err)
+		}
 		return
 	}
 
-	renderHTML(w, templates.SettingsFullPage(&cfg, a.logoDataURI))
+	if err := renderHTML(w, templates.SettingsFullPage(&cfg, a.logoDataURI)); err != nil {
+		a.logger.Error("render settings full page", err)
+	}
 }
 
 func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
@@ -499,7 +567,9 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseForm(); err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("invalid form data"))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.ErrorRow("invalid form data")); renderErr != nil {
+			a.logger.Error("render error row", renderErr)
+		}
 		return
 	}
 
@@ -514,40 +584,54 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 
 	network := strings.TrimSpace(r.FormValue("network"))
 	if err := internalwol.ValidateBroadcast(network); err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid network: "+err.Error(), &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid network: "+err.Error(), &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 
 	timeoutStr := strings.TrimSpace(r.FormValue("timeout"))
 	timeout, err := time.ParseDuration(timeoutStr)
 	if err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid timeout: "+err.Error(), &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid timeout: "+err.Error(), &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 	if timeout <= 0 {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("timeout must be greater than 0", &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("timeout must be greater than 0", &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 
 	heartbeatStr := strings.TrimSpace(r.FormValue("heartbeat"))
 	heartbeat, err := time.ParseDuration(heartbeatStr)
 	if err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid heartbeat: "+err.Error(), &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid heartbeat: "+err.Error(), &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 	if heartbeat <= 0 {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("heartbeat must be greater than 0", &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("heartbeat must be greater than 0", &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 
 	cfgRefreshStr := strings.TrimSpace(r.FormValue("configRefresh"))
 	cfgRefresh, err := time.ParseDuration(cfgRefreshStr)
 	if err != nil {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid configRefresh: "+err.Error(), &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("invalid configRefresh: "+err.Error(), &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 	if cfgRefresh <= 0 {
-		renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("configRefresh must be greater than 0", &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusBadRequest, templates.SettingsError("configRefresh must be greater than 0", &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 
@@ -555,7 +639,9 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 	newToken := strings.TrimSpace(r.FormValue("telegramToken"))
 	if cfg.Token != "" && newToken != "" {
 		// Token is already set and user is trying to change it - not allowed
-		renderHTMLStatus(w, http.StatusForbidden, templates.SettingsError("token is already configured and cannot be changed", &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusForbidden, templates.SettingsError("token is already configured and cannot be changed", &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 
@@ -571,14 +657,18 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.cfgMgr.Update(cfg); err != nil {
 		a.logger.Error("update config", err)
-		renderHTMLStatus(w, http.StatusInternalServerError, templates.SettingsError("failed to update config: "+err.Error(), &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusInternalServerError, templates.SettingsError("failed to update config: "+err.Error(), &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 
 	// Immediately reload config from disk to verify persistence and ensure consistency
 	if err := a.cfgMgr.Reload(); err != nil {
 		a.logger.Error("reload config after update", err)
-		renderHTMLStatus(w, http.StatusInternalServerError, templates.SettingsError("settings saved but verification failed: "+err.Error(), &cfg))
+		if renderErr := renderHTMLStatus(w, http.StatusInternalServerError, templates.SettingsError("settings saved but verification failed: "+err.Error(), &cfg)); renderErr != nil {
+			a.logger.Error("render settings error", renderErr)
+		}
 		return
 	}
 
@@ -628,7 +718,9 @@ func (a *App) handleUpdateSettingsForm(w http.ResponseWriter, r *http.Request) {
 		"tokenSet", verifiedCfg.Token != "",
 	)
 
-	renderHTMLStatus(w, http.StatusOK, templates.SettingsUpdated())
+	if err := renderHTMLStatus(w, http.StatusOK, templates.SettingsUpdated()); err != nil {
+		a.logger.Error("render settings updated", err)
+	}
 }
 
 // Auth-related request/response types
@@ -917,5 +1009,7 @@ func (a *App) handleStatusTable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hosts := a.getHostStatuses()
-	renderHTML(w, templates.StatusTableRows(hosts))
+	if err := renderHTML(w, templates.StatusTableRows(hosts)); err != nil {
+		a.logger.Error("render status table rows", err)
+	}
 }
