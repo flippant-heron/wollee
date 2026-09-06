@@ -86,6 +86,7 @@ func Load(path string) (Config, error) {
 	v.SetConfigFile(path)
 	v.SetConfigType("yaml")
 	v.SetDefault("server.port", 8080)
+	v.SetDefault("server.network", "192.168.1.0/24")
 	v.SetDefault("server.heartbeat", "30s")
 	v.SetDefault("server.timeout", "5m")
 	v.SetDefault("server.configRefresh", "5m")
@@ -99,8 +100,14 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("bind env server.passwordHash: %w", err)
 	}
 
+	configExists := true
 	if err := v.ReadInConfig(); err != nil {
-		return Config{}, fmt.Errorf("read config: %w", err)
+		// Only allow missing config files; other errors (parse errors, etc.) should fail
+		if !os.IsNotExist(err) && !isConfigNotFoundError(err) {
+			return Config{}, fmt.Errorf("read config: %w", err)
+		}
+		// File doesn't exist - use defaults and write them to disk
+		configExists = false
 	}
 
 	var raw rawConfig
@@ -123,7 +130,7 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse server.configRefresh: %w", err)
 	}
 
-	return Config{
+	cfg := Config{
 		SourcePath: v.ConfigFileUsed(),
 		Server: ServerConfig{
 			Port:          raw.Server.Port,
@@ -139,7 +146,62 @@ func Load(path string) (Config, error) {
 		},
 		Hosts: raw.Hosts,
 		Logo:  raw.Logo,
-	}, nil
+	}
+
+	// If config file didn't exist, write defaults to disk
+	if !configExists {
+		if err := writeDefaultConfig(path, cfg); err != nil {
+			return Config{}, fmt.Errorf("write default config: %w", err)
+		}
+	}
+
+	return cfg, nil
+}
+
+// writeDefaultConfig writes a YAML config file with defaults to the given path
+func writeDefaultConfig(path string, cfg Config) error {
+	content := `
+hosts: []
+  # Add your devices here, e.g.:
+  # - hostname: desktop
+  #   mac: 00:11:22:33:44:55
+  # - hostname: laptop
+  #   mac: aa:bb:cc:dd:ee:ff
+
+server:
+  port: ` + fmt.Sprintf("%d", cfg.Server.Port) + `
+  # Broadcast address in CIDR notation for sending WOL magic packets.
+  # This is network-specific and must match your local network.
+  # Examples:
+  #   192.168.1.0/24   (common for 192.168.1.x networks)
+  #   192.168.0.0/24   (common for 192.168.0.x networks)
+  #   10.0.0.0/8       (Class A private network)
+  # You can reconfigure this anytime in the web UI (/settings).
+  network: ` + cfg.Server.Network + `
+  heartbeat: ` + cfg.Server.Heartbeat.String() + `
+  timeout: ` + cfg.Server.Timeout.String() + `
+  configRefresh: ` + cfg.Server.ConfigRefresh.String() + `
+  # Optional: Telegram bot token from @BotFather (leave empty to disable)
+  token: ""
+  # Optional: List of Telegram user IDs authorized to use bot commands
+  # Get your user ID by messaging your bot and sending /whoami
+  users: []
+    # - 123456789     # Your Telegram user ID
+    # - 987654321     # Another authorized user (optional)
+  # Optional: Allow unauthenticated /whoami command (default: false)
+  whoami: ` + fmt.Sprintf("%v", cfg.Server.Whoami) + `
+
+logo:
+  # Preferred: filename of an image already placed in web/static/ (rebuild
+  # after adding it). Served at /static/<path>. Ignored if base64 is set.
+  path: logo.png
+  # Alternative: raw base64-encoded image bytes, embedded directly here.
+  # Useful when you do not want to rebuild the binary. Takes precedence
+  # over path if both are set.
+  # base64: iVBORw0KGgo...
+`
+
+	return os.WriteFile(path, []byte(content), 0o600)
 }
 
 func (c *Config) ValidateServer() error {
@@ -207,4 +269,10 @@ func getOrGenerateJWTSecret(secret string) string {
 	}
 
 	return base64.StdEncoding.EncodeToString(randomBytes)
+}
+
+// isConfigNotFoundError checks if the error is a viper ConfigFileNotFoundError
+func isConfigNotFoundError(err error) bool {
+	_, ok := err.(viper.ConfigFileNotFoundError)
+	return ok
 }
